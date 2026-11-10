@@ -2,26 +2,21 @@
 
 Bu proje bir soruyu bağımsız uzman rollerine böler, uzman yanıtlarını paralel çalıştırır ve OpenAI Responses API ile tek bir nihai cevapta birleştirir. n8n workflow'ları kaynak gerçektir; Git deposundaki JSON dosyaları n8n'den dışa aktarılan sürümlerdir.
 
-## Kolay yerel kurulum
+## İndirme ve yerel kurulum
 
-Docker Desktop açıkken proje klasöründe tek komut çalıştırın:
+1. [GitHub deposunda](https://github.com/Demko1969/ortak-akil) **Code → Download ZIP** seçeneğini kullanın ve ZIP’i açın. Özel depoyu indirmek için GitHub hesabınıza giriş yapmanız ve depoya erişiminiz olması gerekir. Git kullanıyorsanız `git clone https://github.com/Demko1969/ortak-akil.git` komutunu çalıştırabilirsiniz.
+2. Docker Desktop’ı kurup başlatın. macOS ve Linux’ta terminali çıkardığınız proje klasöründe açıp aşağıdaki komutu çalıştırın. Windows’ta Docker Desktop’ı Linux container modunda başlatıp `scripts/start.cmd` dosyasını açın.
 
-```sh
-bash scripts/start.sh
-```
+   ```sh
+   bash scripts/start.sh
+   ```
 
-[Web arayüzünü açın](http://localhost:3000) ve OpenAI API anahtarınızı kurulum
-ekranına girmeden önce ekrandaki bağlantıdan n8n yönetici hesabınızı oluşturun. Sekiz workflow otomatik içe aktarılır, OpenAI bağlantıları kurulur
-ve analiz webhook'ları yayınlanır. Ayarlar yeniden başlatmalarda korunur.
-Google Docs çıktısı isteğe bağlı olarak ayrıca etkinleştirilir.
+3. [Yerel uygulamayı açın](http://localhost:3000). Kurulum ekranındaki bağlantıdan yerel n8n yönetici hesabınızı oluşturun. Ardından uygulamaya dönüp **kendi OpenAI API anahtarınızı** girin. Sekiz iş akışı otomatik kurulur. İlk kurulum Docker imajlarını indirdiği için birkaç dakika sürebilir.
+4. **Örnek soruyu kullan** ve ardından **Uzmanları çalıştır** düğmesine basın. CSV denemesi için `ui/tests/fixtures/support.csv` dosyasını yükleyebilirsiniz. Nihai sonuçtaki **Çözüm akışını göster** düğmesi diyagramı açar ve SVG olarak indirmenizi sağlar.
 
-Kurulum, yedekleme ve Google Docs adımları için
-[yerel paket kılavuzuna](deployment/README.md) bakın. Aşağıdaki adımlar mevcut
-n8n kurulumuna elle aktarım içindir.
+Docker kurulumunda bilgisayarınıza ayrıca Node.js kurmanız gerekmez. Gerçek değerlendirmeler OpenAI API kullanımı oluşturur. Google Docs aktarımı isteğe bağlıdır ve kendi Google bağlantınızı gerektirir.
 
-Windows kullanıcıları `scripts/start.cmd` dosyasını çalıştırabilir.
-Dağıtım öncesi kontrol sonuçları ve bilinen sınırlar [SECURITY.md](SECURITY.md)
-dosyasında bulunur. Temiz ZIP paketi `python3 scripts/package-release.py` ile hazırlanır.
+Yedekleme, Google Docs ve sorun giderme için [yerel kurulum kılavuzuna](deployment/README.md) bakın. Dağıtım kontrolleri ve bilinen sınırlar [SECURITY.md](SECURITY.md) dosyasındadır. Yerel kaynak ZIP’i `python3 scripts/package-release.py` ile hazırlanabilir.
 
 ## Bileşenler
 
@@ -33,7 +28,7 @@ dosyasında bulunur. Temiz ZIP paketi `python3 scripts/package-release.py` ile h
 - `ui/`: Next.js web arayüzüdür.
 - `scripts/sync-n8n.sh`: yalnızca tanımlı sekiz workflow'u n8n'den mevcut dosyalarına aktarır.
 
-## Gereksinimler
+## Elle kurulum için gereksinimler
 
 - n8n 2.x (paketlenen sürüm 2.46.6)
 - Node.js 22+
@@ -53,7 +48,6 @@ Bu credential'ı aşağıdaki OpenAI HTTP Request node'larında seçin:
 - `Multi-Agent Planner2 → Call OpenAI Planner`
 - `Multi-Agent Worker2 → Call OpenAI Worker`
 - `Multi-Agent Judge2 → Call Final Judge Synthesis`
-- `Multi-Agent Judge2 → Call Final Judge Synthesis1`
 
 Workflow JSON dosyalarında yalnızca taşınabilir credential referansı bulunur. Gerçek anahtar n8n'in şifreli credential deposunda kalır.
 
