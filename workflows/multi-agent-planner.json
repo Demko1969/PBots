@@ -1,0 +1,139 @@
+{
+  "updatedAt": "2026-08-10T10:56:40.306Z",
+  "createdAt": "2026-08-03T10:23:15.841Z",
+  "id": "eCWvLGwule5hEaJL",
+  "name": "Multi-Agent Planner2",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "80609ddc-7221-4eca-ba11-a034c16db3bb",
+      "name": "Planner Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2384,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst question =\n  typeof input.question === 'string'\n    ? input.question.trim()\n    : '';\n\nif (!question) {\n  throw new Error(\n    'Planner input error: question must be a non-empty string.'\n  );\n}\n\nconst openaiModel =\n  typeof input.openaiModel === 'string' && input.openaiModel.trim()\n    ? input.openaiModel.trim()\n    : 'gpt-5-mini';\n\nreturn [\n  {\n    json: {\n      question,\n      openaiModel,\n    },\n  },\n];"
+      },
+      "id": "9951bab1-34e4-4fb1-add4-68bed5f4cb8b",
+      "name": "Validate Planner Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2592,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    model: $json.openaiModel ?? $json.model ?? \"gpt-5-mini\",\n\n    instructions: `Türkçe, çakışmayan uzman görevleri planla. Önce bağımsız inceleme alanlarını belirle, sonra sayıyı seç. Tek inceleme için 1, iki ayrı alan için 2, üç veya dört ayrı alan için 3–4 uzman kullan. Bir alana çok sayıda farklı ölçüm ve yorum yükleme. Örneğin destek hizmeti kalitesi sorusu süre/hedef uyumu, yeniden açılma ve eksik memnuniyet puanlarını birlikte soruyorsa bunları üç ayrı görev yap. Benzer ölçütleri grupla; ek uzman ancak ayrı bir bulgu getirecekse ekle. Her uzmana tek ve farklı inceleme konusu ver; rolü kısa, görevi en çok 25 kelime olsun. Her görevi tek başına uygulanabilir yaz. Hesaplanmış CSV göstergelerini yeniden hesaplatma. Nihai cevap, genel öneri listesi veya özet için ayrı uzman atama. Her uzman kendi alanında uygulanabilir bir katkı sunsun; nihai aşama bu önerileri sıralayacak. Kimlikler 1’den başlasın.`,\n    input: `${$json.question.split(\"\\n\\nCSV analysis context\\n\")[0]}`,\n    reasoning: { effort: \"low\" },\n    max_output_tokens: 1536,\n\n    text: {\n      format: {\n        type: \"json_schema\",\n        name: \"planner_output\",\n        strict: true,\n        schema: {\n          type: \"object\",\n          properties: {\n            question_type: {\n              type: \"string\"\n            },\n            complexity: {\n              type: \"string\",\n              enum: [\"low\", \"medium\", \"high\"]\n            },\n            agents: {\n              type: \"array\",\n              minItems: 1,\n              maxItems: 4,\n              items: {\n                type: \"object\",\n                properties: {\n                  agent_id: {\n                    type: \"integer\"\n                  },\n                  role: {\n                    type: \"string\"\n                  },\n                  task: {\n                    type: \"string\"\n                  }\n                },\n                required: [\n                  \"agent_id\",\n                  \"role\",\n                  \"task\"\n                ],\n                additionalProperties: false\n              }\n            }\n          },\n          required: [\n            \"question_type\",\n            \"complexity\",\n            \"agents\"\n          ],\n          additionalProperties: false\n        }\n      }\n    }\n  }\n}}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_OPENAI_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "OpenAI API"
+        }
+      },
+      "id": "3d787493-8d8d-49fe-9173-872668f3fbaa",
+      "name": "Call OpenAI Planner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2832,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// OpenAI Responses API çıktısını doğrula;\n// nihai sentez rolleri ile tekrarları kaldır\n// ve Planner sözleşmesine dönüştür.\n\nconst response = $input.first().json;\nconst source = $('Validate Planner Input').first().json;\n\nconst question = source.question;\n\n// Önceki node'da model taşınıyorsa onu kullan.\n// Yoksa varsayılan olarak gpt-5-mini kabul et.\nconst model =\n  source.model ??\n  source.openaiModel ??\n  'gpt-5-mini';\n\n// OpenAI Responses API içindeki output_text değerini bul.\nconst content = response?.output\n  ?.flatMap((item) => Array.isArray(item?.content) ? item.content : [])\n  ?.find((item) => item?.type === 'output_text')\n  ?.text;\n\nif (typeof content !== 'string' || !content.trim()) {\n  throw new Error(\n    'Planner yanıt hatası: OpenAI response.output içinde output_text döndürmedi.'\n  );\n}\n\nlet plan;\n\ntry {\n  plan = JSON.parse(content);\n} catch (error) {\n  throw new Error(\n    `Planner ayrıştırma hatası: OpenAI geçerli JSON döndürmedi (${error.message}).`\n  );\n}\n\nif (!Array.isArray(plan.agents) || plan.agents.length === 0) {\n  throw new Error(\n    'Planner doğrulama hatası: agents boş olmayan bir dizi olmalıdır.'\n  );\n}\n\nconst allowedComplexities = new Set(['low', 'medium', 'high']);\n\nconst complexity = allowedComplexities.has(plan.complexity)\n  ? plan.complexity\n  : null;\n\nif (!complexity) {\n  throw new Error(\n    'Planner doğrulama hatası: complexity low, medium veya high olmalıdır.'\n  );\n}\n\nconst forbiddenRolePattern =\n  /(judge|jüri|hakem|sentez|sentezleyici|rapor yazarı|doküman yazarı|sonuçlandırma|sonuç yazarı|nihai (cevap|yanıt|sonuç)|final (answer|response|report)|baş editör|genel editör|özet uzmanı|özetleyici|özet[/ ]sonuç|öneri koordinatörü)/i;\n\nconst forbiddenTaskPattern =\n  /(tüm (uzman|agent|yanıt|cevap).{0,40}(birleştir|sentezle|özetle)|nihai (cevabı|yanıtı|sonucu|raporu) (yaz|oluştur|hazırla)|final (answer|response|report))/i;\n\nconst genericRolePattern =\n  /^(uzman|expert|assistant|agent|analist|genel analist|soruya özel uzman)(\\s*\\d+)?$/i;\n\nconst normalizeText = (value) =>\n  value\n    .toLocaleLowerCase('tr-TR')\n    .replace(/[^a-z0-9çğıöşü]+/gi, ' ')\n    .trim();\n\nconst seenRoles = new Set();\nconst seenTasks = new Set();\nconst accepted = [];\n\nfor (const candidate of plan.agents) {\n  if (accepted.length >= (complexity === 'low' ? 1 : 4)) break;\n\n  const role =\n    typeof candidate?.role === 'string'\n      ? candidate.role.trim()\n      : '';\n\n  const task =\n    typeof candidate?.task === 'string'\n      ? candidate.task.trim()\n      : '';\n\n  if (!role || !task) continue;\n\n  if (\n    forbiddenRolePattern.test(role) ||\n    forbiddenTaskPattern.test(task) ||\n    genericRolePattern.test(role)\n  ) {\n    continue;\n  }\n\n  const roleKey = normalizeText(role);\n  const taskKey = normalizeText(task);\n\n  if (!roleKey || !taskKey) continue;\n\n  if (\n    seenRoles.has(roleKey) ||\n    seenTasks.has(taskKey)\n  ) {\n    continue;\n  }\n\n  seenRoles.add(roleKey);\n  seenTasks.add(taskKey);\n\n  accepted.push({\n    role,\n    task,\n  });\n}\n\nif (accepted.length === 0) {\n  accepted.push({\n    role: 'Konu Alanı Analisti',\n    task:\n      'Asıl sorunun doğrudan cevaplanması için gerekli temel olguları, ölçütleri ve belirsizlikleri bağımsız olarak incele.',\n  });\n}\n\nconst agents = accepted.map((agent, index) => ({\n  agent_id: index + 1,\n  role: agent.role,\n  task: agent.task,\n}));\n\nconst questionType =\n  typeof plan.question_type === 'string' &&\n  plan.question_type.trim()\n    ? plan.question_type.trim()\n    : 'genel';\n\nreturn [\n  {\n    json: {\n      question,\n      model,\n      questionType,\n      complexity,\n      agentCount: agents.length,\n      agents,\n    },\n  },\n];"
+      },
+      "id": "199c43d2-36f6-4691-968b-9b5bd6c7038d",
+      "name": "Validate and Normalize Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3072,
+        640
+      ]
+    }
+  ],
+  "connections": {
+    "Planner Input": {
+      "main": [
+        [
+          {
+            "node": "Validate Planner Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Planner Input": {
+      "main": [
+        [
+          {
+            "node": "Call OpenAI Planner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call OpenAI Planner": {
+      "main": [
+        [
+          {
+            "node": "Validate and Normalize Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "b7d8631c-f39c-41b1-8c72-6288a24e157a",
+  "activeVersionId": "b7d8631c-f39c-41b1-8c72-6288a24e157a",
+  "versionCounter": 35,
+  "triggerCount": 0,
+  "tags": [],
+  "versionMetadata": {
+    "name": "Version b7d8631c",
+    "description": ""
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "updatedAt": "2026-08-05T13:48:44.087Z",
+  "createdAt": "2026-08-04T13:24:47.101Z",
+  "id": "dWKIaKeVID1i2XTs",
+  "name": "Multi-Agent UI - Worker API",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "multi-agent-ui-worker",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "074d16fd-546f-4a65-805d-54999b356cb2",
+      "name": "UI Worker Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        16
+      ],
+      "webhookId": "ui-worker-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst body =\n  input.body && typeof input.body === 'object'\n    ? input.body\n    : input;\n\nconst required = ['question', 'role', 'task'];\n\nfor (const field of required) {\n  if (typeof body[field] !== 'string' || !body[field].trim()) {\n    throw new Error(\n      'UI Worker input error: ' +\n      field +\n      ' must be a non-empty string.'\n    );\n  }\n}\n\nif (\n  !Number.isInteger(body.agentId) ||\n  body.agentId < 1 ||\n  body.agentId > 10\n) {\n  throw new Error(\n    'UI Worker input error: agentId must be an integer from 1 to 10.'\n  );\n}\n\nconst agentCount = Number(body.agentCount ?? 1);\n\nif (\n  !Number.isInteger(agentCount) ||\n  agentCount < 1 ||\n  agentCount > 10\n) {\n  throw new Error(\n    'UI Worker input error: agentCount must be an integer from 1 to 10.'\n  );\n}\n\nreturn [\n  {\n    json: {\n      question: body.question.trim(),\n      openaiModel:\n        typeof body.openaiModel === 'string' && body.openaiModel.trim()\n          ? body.openaiModel.trim()\n          : 'gpt-5-mini',\n      questionType:\n        typeof body.questionType === 'string' && body.questionType.trim()\n          ? body.questionType.trim()\n          : 'genel',\n      complexity:\n        typeof body.complexity === 'string' && body.complexity.trim()\n          ? body.complexity.trim()\n          : 'low',\n      agentCount,\n      agentId: body.agentId,\n      role: body.role.trim(),\n      task: body.task.trim(),\n    },\n  },\n];"
+      },
+      "id": "92b5ac60-d37d-446a-9803-cc3858a08439",
+      "name": "Prepare UI Worker Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "d4eiJ2ZTu87WU8eC",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/d4eiJ2ZTu87WU8eC",
+          "cachedResultName": "Multi-Agent Worker2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "a1902f92-6263-4dbb-93c8-856553dc78d1",
+      "name": "Execute Worker Workflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "5936c5df-e086-4353-af47-cdcdd484b8ea",
+      "name": "Respond UI Worker",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        640,
+        16
+      ]
+    }
+  ],
+  "connections": {
+    "UI Worker Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare UI Worker Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare UI Worker Input": {
+      "main": [
+        [
+          {
+            "node": "Execute Worker Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Worker Workflow": {
+      "main": [
+        [
+          {
+            "node": "Respond UI Worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "a639cb0b-14e7-4d9e-96a5-49a29bd64793",
+  "activeVersionId": "a639cb0b-14e7-4d9e-96a5-49a29bd64793",
+  "versionCounter": 5,
+  "triggerCount": 1,
+  "tags": [],
+  "versionMetadata": {
+    "name": "Version a639cb0b",
+    "description": ""
+  }
+}

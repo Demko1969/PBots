@@ -1,0 +1,230 @@
+{
+  "updatedAt": "2026-08-05T13:52:51.306Z",
+  "createdAt": "2026-08-04T13:25:56.814Z",
+  "id": "BdWFAQzKCellIUN5",
+  "name": "Multi-Agent UI - Google Docs API",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "multi-agent-ui-docs",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "7a95bc18-7704-4b14-86e0-855bed1f4918",
+      "name": "UI Docs Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        528,
+        64
+      ],
+      "webhookId": "ui-docs-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst body =\n  input.body && typeof input.body === 'object'\n    ? input.body\n    : input;\n\nif (\n  typeof body.question !== 'string' ||\n  !body.question.trim()\n) {\n  throw new Error(\n    'UI Docs input error: question is missing.'\n  );\n}\n\nif (\n  typeof body.finalAnswer !== 'string' ||\n  !body.finalAnswer.trim()\n) {\n  throw new Error(\n    'UI Docs input error: finalAnswer is missing.'\n  );\n}\n\nif (\n  !Array.isArray(body.answers) ||\n  body.answers.length === 0\n) {\n  throw new Error(\n    'UI Docs input error: answers are missing.'\n  );\n}\n\nreturn [\n  {\n    json: {\n      ...body,\n      question: body.question.trim(),\n      finalAnswer: body.finalAnswer.trim(),\n      openaiModel: 'gpt-5-mini',\n    },\n  },\n];"
+      },
+      "id": "2274a103-6bb9-44b8-8806-c12412cdd2ad",
+      "name": "Prepare UI Docs Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\n\nif (typeof result.finalAnswer !== 'string' || !result.finalAnswer.trim()) {\n  throw new Error('Rapor hatası: Judge finalAnswer döndürmedi.');\n}\n\nif (!Array.isArray(result.answers) || result.answers.length === 0) {\n  throw new Error('Rapor hatası: Judge Worker yanıtlarını döndürmedi.');\n}\n\nif (typeof result.question !== 'string' || !result.question.trim()) {\n  throw new Error('Rapor hatası: asıl soru korunmadı.');\n}\n\nfunction splitMarkdownTableRow(line) {\n  return line\n    .trim()\n    .replace(/^\\|/, '')\n    .replace(/\\|$/, '')\n    .split('|')\n    .map(cell => cell.trim());\n}\n\nfunction isMarkdownTableSeparator(line) {\n  const cells = splitMarkdownTableRow(line);\n  return cells.length > 1\n    && cells.every(cell => /^:?-{3,}:?$/.test(cell));\n}\n\nfunction convertMarkdownTables(input) {\n  const lines = String(input || '').replace(/\\r\\n?/g, '\\n').split('\\n');\n  const output = [];\n\n  for (let index = 0; index < lines.length; index += 1) {\n    const headerLine = lines[index];\n    const separatorLine = lines[index + 1];\n    const isTableStart = headerLine.includes('|')\n      && typeof separatorLine === 'string'\n      && isMarkdownTableSeparator(separatorLine);\n\n    if (!isTableStart) {\n      // Tek başına kalmış Markdown tablo ayraçlarını tamamen kaldır.\n      if (!isMarkdownTableSeparator(headerLine)) output.push(headerLine);\n      continue;\n    }\n\n    const headers = splitMarkdownTableRow(headerLine);\n    const rows = [];\n    index += 2;\n\n    while (index < lines.length && lines[index].includes('|')) {\n      const cells = splitMarkdownTableRow(lines[index]);\n      if (!isMarkdownTableSeparator(lines[index]) && cells.some(Boolean)) {\n        rows.push(cells);\n      }\n      index += 1;\n    }\n\n    index -= 1;\n    output.push('');\n\n    if (rows.length === 0) {\n      output.push(headers.filter(Boolean).join(' - '));\n    } else {\n      rows.forEach(cells => {\n        const firstHeader = headers[0] || '';\n        const firstValue = cells[0] || '';\n        if (firstValue) {\n          const title = (firstHeader ? firstHeader + ': ' : '') + firstValue;\n          output.push('• **' + title + '**');\n        }\n        headers.slice(1).forEach((header, offset) => {\n          const value = cells[offset + 1] || '';\n          if (header && value) output.push('  ' + header + ': ' + value);\n        });\n        output.push('');\n      });\n    }\n  }\n\n  return output.join('\\n');\n}\n\nfunction normalizeMarkdownForDocs(input) {\n  return convertMarkdownTables(input)\n    // Sunum değerini düşüren tek başına \"Kayıt 1\" etiketlerini kaldır.\n    .replace(/^\\s*(?:\\*{2})?Kayıt\\s+\\d+(?:\\*{2})?\\s*$/gmi, '')\n    // Markdown başlıklarını gerçek kalın metin isteğine dönüştür.\n    .replace(/^\\s*#{1,6}\\s+(.+)$/gm, '**$1**')\n    // Markdown madde işaretlerini düz Unicode madde işaretine dönüştür.\n    .replace(/^\\s*[-*+]\\s+/gm, '• ')\n    // Tek yıldızlı italik işaretlerini kaldır; metni koru.\n    .replace(/(^|[^\\*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1$2')\n    .replace(/~~([^~\\n]+)~~/g, '$1')\n    .replace(/`([^`\\n]+)`/g, '$1')\n    // Modelin hatalı üretebildiği artık tablo ayraçlarını temizle.\n    .replace(/^\\s*\\|?\\s*:?-{3,}:?(?:\\s*\\|\\s*:?-{3,}:?)+\\s*\\|?\\s*$/gm, '')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\nfunction convertBoldMarkdown(input) {\n  const source = String(input || '');\n  const requests = [];\n  let text = '';\n  let cursor = 0;\n  // Bir bold çifti başka bir satıra taşamaz. Böylece iki bağımsız bozuk\n  // işaret arasında kalan sayfalar yanlışlıkla kalınlaştırılmaz.\n  const pattern = /\\*\\*([^*\\n]+)\\*\\*/g;\n  let match;\n\n  while ((match = pattern.exec(source)) !== null) {\n    // Geçerli bir çiftin dışında kalan artık işaretleri metinden at.\n    text += source.slice(cursor, match.index).replace(/\\*\\*/g, '');\n\n    // Google Docs metin indeksleri 1'den başlar.\n    const startIndex = text.length + 1;\n    text += match[1];\n    const endIndex = text.length + 1;\n\n    if (endIndex > startIndex) {\n      requests.push({\n        updateTextStyle: {\n          range: {\n            startIndex,\n            endIndex,\n          },\n          textStyle: {\n            bold: true,\n          },\n          fields: 'bold',\n        },\n      });\n    }\n\n    cursor = match.index + match[0].length;\n  }\n\n  text += source.slice(cursor).replace(/\\*\\*/g, '');\n\n  return {\n    text,\n    requests,\n  };\n}\n\nconst createdAt = new Date().toISOString();\n// Analysis context belongs to the evidence channel, never to the reader's question.\nconst readerQuestion = result.question.split(/\\n\\nCSV analysis context\\n/)[0].trim();\nconst shortQuestion = readerQuestion.replace(/[\\r\\n]+/g, ' ').slice(0, 70);\nconst documentTitle = 'Yönetici Karar Raporu - ' + shortQuestion + ' - ' + createdAt.slice(0, 10);\nconst contradictions = Array.isArray(result.unresolvedContradictions)\n  ? result.unresolvedContradictions.filter(value => typeof value === 'string' && value.trim()) : [];\nconst rawReportText = [\n  '**YÖNETİCİ KARAR RAPORU**',\n  'Tarih: ' + createdAt.slice(0, 10),\n  '',\n  '**DEĞERLENDİRİLEN SORU**',\n  readerQuestion,\n  '',\n  '**KARAR VE ÇÖZÜM**',\n  result.finalAnswer,\n  '',\n  '**UZMAN YANITLARI**',\n  ...result.answers.flatMap((entry, index) => [\n    '',\n    '**' + (index + 1) + '. ' + (entry.role || 'Uzman') + '**',\n    entry.answer,\n  ]),\n  ...(contradictions.length ? ['', '**KARARI ETKİLEYEN BELİRSİZLİKLER**', ...contradictions.map(value => '• ' + value)] : []),\n].join('\\n');\nconst formattedReport = convertBoldMarkdown(normalizeMarkdownForDocs(rawReportText));\nreturn [{ json: { ...result, createdAt, documentTitle,\n  reportText: formattedReport.text, docsStyleRequests: formattedReport.requests } }];\n"
+      },
+      "id": "75a19396-f1cc-4c6b-b1c2-0f09b735f109",
+      "name": "Build Google Docs Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "createFromText",
+        "content": "={{ $json.reportText }}",
+        "name": "={{ $json.documentTitle }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1Et3GdNOGmC0s8H8HhKf0sNgLyEmadP0w",
+          "mode": "list",
+          "cachedResultName": "Test",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1Et3GdNOGmC0s8H8HhKf0sNgLyEmadP0w"
+        },
+        "options": {
+          "convertToGoogleDocument": true
+        }
+      },
+      "id": "e8bdd120-747b-47a0-ab65-4b4844537083",
+      "name": "Create Report in Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1248,
+        64
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_GOOGLE_OAUTH_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://docs.googleapis.com/v1/documents/' + $json.id + ':batchUpdate' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDocsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { requests: $('Build Google Docs Report').first().json.docsStyleRequests } }}",
+        "options": {}
+      },
+      "id": "55e922a8-7e44-476a-a81b-68c701227bb7",
+      "name": "Apply Google Docs Formatting",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1488,
+        64
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "REPLACE_WITH_GOOGLE_OAUTH_CREDENTIAL_ID",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const driveResult = $('Create Report in Google Drive').first().json;\nconst report = $('Build Google Docs Report').first().json;\n\nif (typeof driveResult.id !== 'string' || !driveResult.id.trim()) {\n  throw new Error('Google Drive error: document creation returned no file ID.');\n}\n\nconst documentUrl = 'https://docs.google.com/document/d/'\n  + driveResult.id\n  + '/edit';\n\nreturn [{\n  json: {\n    output: report.finalAnswer\n      + '\\n\\nKaydedilen Google Docs raporu: '\n      + documentUrl,\n    finalAnswer: report.finalAnswer,\n    model: report.model,\n    openaiModel: report.openaiModel || report.model,\n    documentId: driveResult.id,\n    documentUrl,\n  },\n}];"
+      },
+      "id": "890f0ed9-221d-403a-b106-a7918d271467",
+      "name": "Return Google Docs Link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "51b40b3c-5c78-485c-903d-f84b794a51e6",
+      "name": "Respond UI Docs",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1968,
+        64
+      ]
+    }
+  ],
+  "connections": {
+    "UI Docs Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare UI Docs Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare UI Docs Input": {
+      "main": [
+        [
+          {
+            "node": "Build Google Docs Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Google Docs Report": {
+      "main": [
+        [
+          {
+            "node": "Create Report in Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Report in Google Drive": {
+      "main": [
+        [
+          {
+            "node": "Apply Google Docs Formatting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Google Docs Formatting": {
+      "main": [
+        [
+          {
+            "node": "Return Google Docs Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Google Docs Link": {
+      "main": [
+        [
+          {
+            "node": "Respond UI Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "2d8f084f-0dfc-4952-89d9-e70a9a1f6742",
+  "activeVersionId": "2d8f084f-0dfc-4952-89d9-e70a9a1f6742",
+  "versionCounter": 10,
+  "triggerCount": 1,
+  "tags": [],
+  "versionMetadata": {
+    "name": "Version 2d8f084f",
+    "description": ""
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "updatedAt": "2026-08-06T11:08:04.621Z",
+  "createdAt": "2026-08-04T13:22:56.689Z",
+  "id": "FQaBhDfItsZvVTNf",
+  "name": "Multi-Agent UI - Plan API",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "multi-agent-ui-plan",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e14e7616-f346-4406-985d-40e821b4dc3f",
+      "name": "UI Plan Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "ui-plan-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst body =\n  input.body && typeof input.body === 'object'\n    ? input.body\n    : input;\n\nconst question =\n  typeof body.question === 'string'\n    ? body.question.trim()\n    : '';\n\nif (!question) {\n  throw new Error(\n    'UI Planner input error: question must be a non-empty string.'\n  );\n}\n\nreturn [\n  {\n    json: {\n      question,\n      openaiModel:\n        typeof body.openaiModel === 'string' && body.openaiModel.trim()\n          ? body.openaiModel.trim()\n          : 'gpt-5-mini',\n    },\n  },\n];"
+      },
+      "id": "5eb66c72-6080-42fe-8e60-2a85e7241346",
+      "name": "Prepare UI Plan Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "eCWvLGwule5hEaJL",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/eCWvLGwule5hEaJL",
+          "cachedResultName": "Multi-Agent Planner2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "d9065e51-6447-4c7f-8408-310a032ef17c",
+      "name": "Execute Planner Workflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $input.first().json;\n\nconst question =\n  typeof plan.question === 'string'\n    ? plan.question.trim()\n    : '';\n\nif (!question) {\n  throw new Error(\n    'UI Planner response error: question must be a non-empty string.'\n  );\n}\n\nif (\n  !Array.isArray(plan.agents) ||\n  plan.agents.length < 1 ||\n  plan.agents.length > 10\n) {\n  throw new Error(\n    'UI Planner response error: agents must contain 1 to 10 entries.'\n  );\n}\n\nconst agents = plan.agents.map((agent, index) => {\n  if (!agent || typeof agent !== 'object') {\n    throw new Error(\n      `UI Planner response error: agent at index ${index} must be an object.`\n    );\n  }\n\n  const agentId =\n    Number.isInteger(agent.agent_id)\n      ? agent.agent_id\n      : Number.isInteger(agent.agentId)\n        ? agent.agentId\n        : index + 1;\n\n  const role =\n    typeof agent.role === 'string'\n      ? agent.role.trim()\n      : '';\n\n  const task =\n    typeof agent.task === 'string'\n      ? agent.task.trim()\n      : '';\n\n  if (\n    agentId < 1 ||\n    agentId > 10 ||\n    !role ||\n    !task\n  ) {\n    throw new Error(\n      `UI Planner response error: invalid agent at index ${index}. ` +\n      `agentId=${agentId}, role=${JSON.stringify(role)}, ` +\n      `task length=${task.length}.`\n    );\n  }\n\n  return {\n    agentId,\n    role,\n    task,\n  };\n});\n\nconst model =\n  typeof plan.model === 'string' && plan.model.trim()\n    ? plan.model.trim()\n    : typeof plan.openaiModel === 'string' && plan.openaiModel.trim()\n      ? plan.openaiModel.trim()\n      : 'gpt-5-mini';\n\nconst questionType =\n  typeof plan.questionType === 'string' && plan.questionType.trim()\n    ? plan.questionType.trim()\n    : typeof plan.question_type === 'string' && plan.question_type.trim()\n      ? plan.question_type.trim()\n      : 'genel';\n\nconst complexity =\n  typeof plan.complexity === 'string' && plan.complexity.trim()\n    ? plan.complexity.trim()\n    : 'low';\n\nreturn [\n  {\n    json: {\n      question,\n      model,\n      openaiModel: model,\n      questionType,\n      complexity,\n      agentCount: agents.length,\n      agents,\n    },\n  },\n];"
+      },
+      "id": "21e7b701-38a6-4b12-9111-5f237cbf01ee",
+      "name": "Format UI Plan Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "f99ebe93-8b8b-40c7-b221-a3833442823e",
+      "name": "Respond UI Plan",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        960,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "UI Plan Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare UI Plan Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare UI Plan Input": {
+      "main": [
+        [
+          {
+            "node": "Execute Planner Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Planner Workflow": {
+      "main": [
+        [
+          {
+            "node": "Format UI Plan Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format UI Plan Response": {
+      "main": [
+        [
+          {
+            "node": "Respond UI Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "ec7517b5-fc2a-4f17-8cea-4d2b0c9155e2",
+  "activeVersionId": "ec7517b5-fc2a-4f17-8cea-4d2b0c9155e2",
+  "versionCounter": 17,
+  "triggerCount": 1,
+  "tags": [],
+  "versionMetadata": {
+    "name": "Version ec7517b5",
+    "description": ""
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "n8n-dynamic-multi-agent-qa",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "validate": "node scripts/validate-workflows.mjs && node scripts/test-contracts.mjs && node scripts/test-google-docs-formatting.mjs && node scripts/test-google-docs-formatting.mjs multi-agent-ui-docs.json"
+  }
+}

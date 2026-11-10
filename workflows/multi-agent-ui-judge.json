@@ -1,0 +1,138 @@
+{
+  "updatedAt": "2026-08-06T15:26:29.700Z",
+  "createdAt": "2026-08-04T13:25:22.220Z",
+  "id": "mOkdCDiQB67MDpCB",
+  "name": "Multi-Agent UI - Judge API",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "multi-agent-ui-judge",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "8c72263c-2408-45fd-8b0c-5afa02d22010",
+      "name": "UI Judge Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "ui-judge-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst body =\n  input.body && typeof input.body === 'object'\n    ? input.body\n    : input;\n\nif (\n  typeof body.question !== 'string' ||\n  !body.question.trim()\n) {\n  throw new Error(\n    'UI Judge input error: question must be a non-empty string.'\n  );\n}\n\nif (\n  !Array.isArray(body.answers) ||\n  body.answers.length < 1 ||\n  body.answers.length > 10\n) {\n  throw new Error(\n    'UI Judge input error: answers must contain 1 to 10 entries.'\n  );\n}\n\nconst answers = body.answers.map((answer, index) => {\n  if (\n    !Number.isInteger(answer.agentId) ||\n    answer.agentId < 1 ||\n    answer.agentId > 10 ||\n    typeof answer.role !== 'string' ||\n    !answer.role.trim() ||\n    typeof answer.task !== 'string' ||\n    !answer.task.trim() ||\n    typeof answer.answer !== 'string' ||\n    !answer.answer.trim()\n  ) {\n    throw new Error(\n      'UI Judge input error: invalid answer at index ' + index + '.'\n    );\n  }\n\n  return {\n    ...answer,\n    role: answer.role.trim(),\n    task: answer.task.trim(),\n    answer: answer.answer.trim(),\n  };\n});\n\nreturn [\n  {\n    json: {\n      question: body.question.trim(),\n      openaiModel:\n        typeof body.openaiModel === 'string' && body.openaiModel.trim()\n          ? body.openaiModel.trim()\n          : 'gpt-5-mini',\n      questionType:\n        typeof body.questionType === 'string' && body.questionType.trim()\n          ? body.questionType.trim()\n          : 'genel',\n      complexity:\n        typeof body.complexity === 'string' && body.complexity.trim()\n          ? body.complexity.trim()\n          : 'low',\n      agentCount: answers.length,\n      answers,\n    },\n  },\n];"
+      },
+      "id": "d2c8ec66-4df8-4f78-9dae-c154e1051629",
+      "name": "Prepare UI Judge Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SE1azDIAs87vFUna",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SE1azDIAs87vFUna",
+          "cachedResultName": "Multi-Agent Judge2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "4e6cafa9-08e0-4fab-a21f-994b5c165916",
+      "name": "Execute Judge Workflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "5dcc5ed9-78cd-40c1-8671-2ea5f278ee0c",
+      "name": "Respond UI Judge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        720,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "UI Judge Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare UI Judge Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare UI Judge Input": {
+      "main": [
+        [
+          {
+            "node": "Execute Judge Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Judge Workflow": {
+      "main": [
+        [
+          {
+            "node": "Respond UI Judge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "d5ab1cf6-fedc-4a63-b810-15fd3534cba1",
+  "activeVersionId": "d5ab1cf6-fedc-4a63-b810-15fd3534cba1",
+  "versionCounter": 5,
+  "triggerCount": 1,
+  "tags": [],
+  "versionMetadata": {
+    "name": "Version d5ab1cf6",
+    "description": ""
+  }
+}

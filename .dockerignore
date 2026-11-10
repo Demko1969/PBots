@@ -1,0 +1,12 @@
+**/node_modules
+**/.env*
+.git
+.pnpm-store
+output
+tmp
+ui/dist
+ui/.wrangler
+ui/.next
+ui/.vinext
+**/*.tsbuildinfo
+**/.DS_Store

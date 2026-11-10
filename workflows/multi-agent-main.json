@@ -1,0 +1,375 @@
+{
+  "updatedAt": "2026-08-10T10:51:13.835Z",
+  "createdAt": "2026-08-03T10:21:42.495Z",
+  "id": "nf1usCSYXipWNQH9",
+  "name": "Multi-Agent Main2",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const driveResult = $('Create Report in Google Drive').first().json;\nconst report = $('Build Google Docs Report').first().json;\n\nif (typeof driveResult.id !== 'string' || !driveResult.id.trim()) {\n  throw new Error(\n    'Google Drive error: document creation returned no file ID.'\n  );\n}\n\nif (\n  typeof report.finalAnswer !== 'string' ||\n  !report.finalAnswer.trim()\n) {\n  throw new Error(\n    'Final output error: report finalAnswer is missing.'\n  );\n}\n\nconst documentId = driveResult.id.trim();\n\nconst documentUrl =\n  'https://docs.google.com/document/d/' +\n  documentId +\n  '/edit';\n\nreturn [\n  {\n    json: {\n      output:\n        report.finalAnswer.trim() +\n        '\\n\\nKaydedilen Google Docs raporu: ' +\n        documentUrl,\n\n      finalAnswer: report.finalAnswer.trim(),\n\n      coverageScore:\n        Number.isFinite(report.coverageScore)\n          ? report.coverageScore\n          : null,\n\n      model:\n        typeof report.model === 'string' && report.model.trim()\n          ? report.model.trim()\n          : 'gpt-5-mini',\n\n      documentId,\n      documentUrl,\n    },\n  },\n];"
+      },
+      "id": "c9393cec-f4fd-4508-8683-f48256cab161",
+      "name": "Return Final Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6256,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://docs.googleapis.com/v1/documents/' + $json.id + ':batchUpdate' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDocsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { requests: $('Build Google Docs Report').first().json.docsStyleRequests } }}",
+        "options": {}
+      },
+      "id": "be6d01a1-93ab-45e3-beae-c6a8ebd035b0",
+      "name": "Apply Google Docs Formatting",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6016,
+        1568
+      ],
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "REPLACE_WITH_GOOGLE_OAUTH_CREDENTIAL_ID",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "createFromText",
+        "content": "={{ $json.reportText }}",
+        "name": "={{ $json.documentTitle }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1Et3GdNOGmC0s8H8HhKf0sNgLyEmadP0w",
+          "mode": "list",
+          "cachedResultName": "Test",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1Et3GdNOGmC0s8H8HhKf0sNgLyEmadP0w"
+        },
+        "options": {
+          "convertToGoogleDocument": true
+        }
+      },
+      "id": "979b9957-7805-4140-ae7a-55302fe710fc",
+      "name": "Create Report in Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        5776,
+        1568
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_GOOGLE_OAUTH_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\n\nif (typeof result.finalAnswer !== 'string' || !result.finalAnswer.trim()) {\n  throw new Error('Rapor hatası: Judge finalAnswer döndürmedi.');\n}\n\nif (!Array.isArray(result.answers) || result.answers.length === 0) {\n  throw new Error('Rapor hatası: Judge Worker yanıtlarını döndürmedi.');\n}\n\nif (typeof result.question !== 'string' || !result.question.trim()) {\n  throw new Error('Rapor hatası: asıl soru korunmadı.');\n}\n\nfunction splitMarkdownTableRow(line) {\n  return line\n    .trim()\n    .replace(/^\\|/, '')\n    .replace(/\\|$/, '')\n    .split('|')\n    .map(cell => cell.trim());\n}\n\nfunction isMarkdownTableSeparator(line) {\n  const cells = splitMarkdownTableRow(line);\n  return cells.length > 1\n    && cells.every(cell => /^:?-{3,}:?$/.test(cell));\n}\n\nfunction convertMarkdownTables(input) {\n  const lines = String(input || '').replace(/\\r\\n?/g, '\\n').split('\\n');\n  const output = [];\n\n  for (let index = 0; index < lines.length; index += 1) {\n    const headerLine = lines[index];\n    const separatorLine = lines[index + 1];\n    const isTableStart = headerLine.includes('|')\n      && typeof separatorLine === 'string'\n      && isMarkdownTableSeparator(separatorLine);\n\n    if (!isTableStart) {\n      // Tek başına kalmış Markdown tablo ayraçlarını tamamen kaldır.\n      if (!isMarkdownTableSeparator(headerLine)) output.push(headerLine);\n      continue;\n    }\n\n    const headers = splitMarkdownTableRow(headerLine);\n    const rows = [];\n    index += 2;\n\n    while (index < lines.length && lines[index].includes('|')) {\n      const cells = splitMarkdownTableRow(lines[index]);\n      if (!isMarkdownTableSeparator(lines[index]) && cells.some(Boolean)) {\n        rows.push(cells);\n      }\n      index += 1;\n    }\n\n    index -= 1;\n    output.push('');\n\n    if (rows.length === 0) {\n      output.push(headers.filter(Boolean).join(' - '));\n    } else {\n      rows.forEach(cells => {\n        const firstHeader = headers[0] || '';\n        const firstValue = cells[0] || '';\n        if (firstValue) {\n          const title = (firstHeader ? firstHeader + ': ' : '') + firstValue;\n          output.push('• **' + title + '**');\n        }\n        headers.slice(1).forEach((header, offset) => {\n          const value = cells[offset + 1] || '';\n          if (header && value) output.push('  ' + header + ': ' + value);\n        });\n        output.push('');\n      });\n    }\n  }\n\n  return output.join('\\n');\n}\n\nfunction normalizeMarkdownForDocs(input) {\n  return convertMarkdownTables(input)\n    // Sunum değerini düşüren tek başına \"Kayıt 1\" etiketlerini kaldır.\n    .replace(/^\\s*(?:\\*{2})?Kayıt\\s+\\d+(?:\\*{2})?\\s*$/gmi, '')\n    // Markdown başlıklarını gerçek kalın metin isteğine dönüştür.\n    .replace(/^\\s*#{1,6}\\s+(.+)$/gm, '**$1**')\n    // Markdown madde işaretlerini düz Unicode madde işaretine dönüştür.\n    .replace(/^\\s*[-*+]\\s+/gm, '• ')\n    // Tek yıldızlı italik işaretlerini kaldır; metni koru.\n    .replace(/(^|[^\\*])\\*([^*\\n]+)\\*(?!\\*)/g, '$1$2')\n    .replace(/~~([^~\\n]+)~~/g, '$1')\n    .replace(/`([^`\\n]+)`/g, '$1')\n    // Modelin hatalı üretebildiği artık tablo ayraçlarını temizle.\n    .replace(/^\\s*\\|?\\s*:?-{3,}:?(?:\\s*\\|\\s*:?-{3,}:?)+\\s*\\|?\\s*$/gm, '')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\nfunction convertBoldMarkdown(input) {\n  const source = String(input || '');\n  const requests = [];\n  let text = '';\n  let cursor = 0;\n  // Bir bold çifti başka bir satıra taşamaz. Böylece iki bağımsız bozuk\n  // işaret arasında kalan sayfalar yanlışlıkla kalınlaştırılmaz.\n  const pattern = /\\*\\*([^*\\n]+)\\*\\*/g;\n  let match;\n\n  while ((match = pattern.exec(source)) !== null) {\n    // Geçerli bir çiftin dışında kalan artık işaretleri metinden at.\n    text += source.slice(cursor, match.index).replace(/\\*\\*/g, '');\n\n    // Google Docs metin indeksleri 1'den başlar.\n    const startIndex = text.length + 1;\n    text += match[1];\n    const endIndex = text.length + 1;\n\n    if (endIndex > startIndex) {\n      requests.push({\n        updateTextStyle: {\n          range: {\n            startIndex,\n            endIndex,\n          },\n          textStyle: {\n            bold: true,\n          },\n          fields: 'bold',\n        },\n      });\n    }\n\n    cursor = match.index + match[0].length;\n  }\n\n  text += source.slice(cursor).replace(/\\*\\*/g, '');\n\n  return {\n    text,\n    requests,\n  };\n}\n\nconst createdAt = new Date().toISOString();\n// Analysis context belongs to the evidence channel, never to the reader's question.\nconst readerQuestion = result.question.split(/\\n\\nCSV analysis context\\n/)[0].trim();\nconst shortQuestion = readerQuestion.replace(/[\\r\\n]+/g, ' ').slice(0, 70);\nconst documentTitle = 'Yönetici Karar Raporu - ' + shortQuestion + ' - ' + createdAt.slice(0, 10);\nconst contradictions = Array.isArray(result.unresolvedContradictions)\n  ? result.unresolvedContradictions.filter(value => typeof value === 'string' && value.trim()) : [];\nconst rawReportText = [\n  '**YÖNETİCİ KARAR RAPORU**',\n  'Tarih: ' + createdAt.slice(0, 10),\n  '',\n  '**DEĞERLENDİRİLEN SORU**',\n  readerQuestion,\n  '',\n  '**KARAR VE ÇÖZÜM**',\n  result.finalAnswer,\n  '',\n  '**UZMAN YANITLARI**',\n  ...result.answers.flatMap((entry, index) => [\n    '',\n    '**' + (index + 1) + '. ' + (entry.role || 'Uzman') + '**',\n    entry.answer,\n  ]),\n  ...(contradictions.length ? ['', '**KARARI ETKİLEYEN BELİRSİZLİKLER**', ...contradictions.map(value => '• ' + value)] : []),\n].join('\\n');\nconst formattedReport = convertBoldMarkdown(normalizeMarkdownForDocs(rawReportText));\nreturn [{ json: { ...result, createdAt, documentTitle,\n  reportText: formattedReport.text, docsStyleRequests: formattedReport.requests } }];\n"
+      },
+      "id": "8f677864-d2de-4aab-a5a1-8b03d9757690",
+      "name": "Build Google Docs Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5536,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SE1azDIAs87vFUna",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SE1azDIAs87vFUna",
+          "cachedResultName": "Multi-Agent Judge2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "08a7ea68-34a1-4d70-af99-863da6622b34",
+      "name": "Execute Judge Workflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        5296,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nif (items.length === 0) {\n  throw new Error(\n    'Main aggregation error: no worker results were returned.'\n  );\n}\n\nconst results = items.map((item) => item.json);\n\nconst question = results[0].question;\n\nif (\n  typeof question !== 'string' ||\n  !question.trim() ||\n  results.some((result) => result.question !== question)\n) {\n  throw new Error(\n    'Main aggregation error: worker question values are missing or inconsistent.'\n  );\n}\n\nconst model = results[0].model;\n\nif (\n  typeof model !== 'string' ||\n  !model.trim() ||\n  results.some((result) => result.model !== model)\n) {\n  throw new Error(\n    'Main aggregation error: Worker model values are missing or inconsistent.'\n  );\n}\n\nconst answers = results\n  .map((result, index) => {\n    if (typeof result.answer !== 'string' || !result.answer.trim()) {\n      throw new Error(\n        `Main aggregation error: worker result ${index + 1} has no answer.`\n      );\n    }\n\n    const agentId = Number(result.agentId);\n\n    if (!Number.isInteger(agentId) || agentId < 1 || agentId > 10) {\n      throw new Error(\n        `Main aggregation error: worker result ${index + 1} has an invalid agentId.`\n      );\n    }\n\n    return {\n      agentId,\n      role:\n        typeof result.role === 'string' && result.role.trim()\n          ? result.role.trim()\n          : `Uzman ${agentId}`,\n      task:\n        typeof result.task === 'string' && result.task.trim()\n          ? result.task.trim()\n          : 'Görev belirtilmedi.',\n      answer: result.answer.trim(),\n      wordCount: Number(result.wordCount ?? 0),\n      containsMarkdownTable:\n        result.containsMarkdownTable === true,\n    };\n  })\n  .sort((a, b) => a.agentId - b.agentId);\n\nconst uniqueIds = new Set(\n  answers.map((answer) => answer.agentId)\n);\n\nif (uniqueIds.size !== answers.length) {\n  throw new Error(\n    'Main aggregation error: duplicate agentId values were returned.'\n  );\n}\n\nconst plan = $('Execute Planner Workflow').first().json;\n\nif (!Number.isInteger(plan.agentCount) || plan.agentCount < 1) {\n  throw new Error(\n    'Main aggregation error: Planner agentCount is missing or invalid.'\n  );\n}\n\nif (answers.length !== plan.agentCount) {\n  throw new Error(\n    `Main aggregation error: expected ${plan.agentCount} Worker results but received ${answers.length}.`\n  );\n}\n\nreturn [\n  {\n    json: {\n      question: question.trim(),\n      model: model.trim(),\n      questionType:\n        typeof plan.questionType === 'string' &&\n        plan.questionType.trim()\n          ? plan.questionType.trim()\n          : 'genel',\n      complexity: ['low', 'medium', 'high'].includes(\n        plan.complexity\n      )\n        ? plan.complexity\n        : 'low',\n      agentCount: answers.length,\n      answers,\n    },\n  },\n];"
+      },
+      "id": "2941e24c-567b-4af9-ac15-ceb9bf4bf0ba",
+      "name": "Aggregate Agent Answers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5056,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "d4eiJ2ZTu87WU8eC",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/d4eiJ2ZTu87WU8eC",
+          "cachedResultName": "Multi-Agent Worker2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "8eca456c-c25e-4393-a328-a4ece19c8950",
+      "name": "Execute Worker Workflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        4816,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $input.first().json;\n\nif (\n  !Array.isArray(plan.agents) ||\n  plan.agents.length < 1 ||\n  plan.agents.length > 10\n) {\n  throw new Error(\n    'Main split error: planner agents must contain 1 to 10 entries.'\n  );\n}\n\nreturn plan.agents.map((agent, index) => ({\n  json: {\n    question: plan.question,\n    model: plan.model ?? 'gpt-5-mini',\n    questionType: plan.questionType,\n    complexity: plan.complexity,\n    agentCount: plan.agentCount ?? plan.agents.length,\n    agentId: agent.agent_id ?? index + 1,\n    role: agent.role,\n    task: agent.task,\n  },\n}));"
+      },
+      "id": "42e471be-0cd5-4637-abc7-d33b05f6dca1",
+      "name": "Split Planner Agents Into Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4576,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "eCWvLGwule5hEaJL",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/eCWvLGwule5hEaJL",
+          "cachedResultName": "Multi-Agent Planner2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "bb9ed64a-4cc2-4fc0-86af-71bd10ee4004",
+      "name": "Execute Planner Workflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        4336,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const chatInput = $input.first().json.chatInput;\nconst question = typeof chatInput === 'string' ? chatInput.trim() : '';\nif (!question) throw new Error('Main input error: chatInput must contain a non-empty user question.');\nreturn [{ json: { question,} }];"
+      },
+      "id": "4a594306-856c-496f-abc5-d66caf39d7bd",
+      "name": "Prepare Question",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4096,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "7165fee3-dbea-4f29-8e32-948050face09",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        3872,
+        1568
+      ],
+      "webhookId": "multi-agent-chat"
+    }
+  ],
+  "connections": {
+    "Apply Google Docs Formatting": {
+      "main": [
+        [
+          {
+            "node": "Return Final Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Report in Google Drive": {
+      "main": [
+        [
+          {
+            "node": "Apply Google Docs Formatting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Google Docs Report": {
+      "main": [
+        [
+          {
+            "node": "Create Report in Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Judge Workflow": {
+      "main": [
+        [
+          {
+            "node": "Build Google Docs Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Agent Answers": {
+      "main": [
+        [
+          {
+            "node": "Execute Judge Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Worker Workflow": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Agent Answers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Planner Agents Into Items": {
+      "main": [
+        [
+          {
+            "node": "Execute Worker Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Planner Workflow": {
+      "main": [
+        [
+          {
+            "node": "Split Planner Agents Into Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Question": {
+      "main": [
+        [
+          {
+            "node": "Execute Planner Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "4738a0cd-ba5e-4a60-a030-daf467cc88b9",
+  "activeVersionId": "4738a0cd-ba5e-4a60-a030-daf467cc88b9",
+  "versionCounter": 98,
+  "triggerCount": 1,
+  "tags": [],
+  "versionMetadata": {
+    "name": "Version 4738a0cd",
+    "description": ""
+  }
+}

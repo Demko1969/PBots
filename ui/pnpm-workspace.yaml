@@ -1,0 +1,21 @@
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - vinext@1.4.4
+supportedArchitectures:
+  os:
+    - current
+  cpu:
+    - current
+  libc:
+    - current
+# Pin security fixes for transitive packages whose parents accept older releases.
+overrides:
+  fast-uri@3: 3.1.9
+  fflate@0.7: 0.7.5
+  brace-expansion@4: 5.0.12
+  minimatch@9: 11.0.1
+  minimatch@10: 11.0.1

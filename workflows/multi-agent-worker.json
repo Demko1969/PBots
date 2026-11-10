@@ -1,0 +1,139 @@
+{
+  "updatedAt": "2026-08-10T10:56:28.761Z",
+  "createdAt": "2026-08-03T10:22:07.211Z",
+  "id": "d4eiJ2ZTu87WU8eC",
+  "name": "Multi-Agent Worker2",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "2a0e24ef-1426-457e-b0b0-b69df148ff03",
+      "name": "Worker Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2016,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst question =\n  typeof input.question === 'string'\n    ? input.question.trim()\n    : '';\n\nconst model =\n  typeof input.openaiModel === 'string' && input.openaiModel.trim()\n    ? input.openaiModel.trim()\n    : typeof input.model === 'string' && input.model.trim()\n      ? input.model.trim()\n      : '';\n\nconst role =\n  typeof input.role === 'string'\n    ? input.role.trim()\n    : '';\n\nconst task =\n  typeof input.task === 'string'\n    ? input.task.trim()\n    : '';\n\nif (!question) {\n  throw new Error(\n    'Worker input error: question must be a non-empty string.'\n  );\n}\n\nif (!model) {\n  throw new Error(\n    'Worker input error: openaiModel or model must be a non-empty string.'\n  );\n}\n\nif (!role) {\n  throw new Error(\n    'Worker input error: role must be a non-empty string.'\n  );\n}\n\nif (!task) {\n  throw new Error(\n    'Worker input error: task must be a non-empty string.'\n  );\n}\n\nif (\n  !Number.isInteger(input.agentId) ||\n  input.agentId < 1 ||\n  input.agentId > 10\n) {\n  throw new Error(\n    'Worker input error: agentId must be an integer from 1 to 10.'\n  );\n}\n\nconst allowedComplexities = new Set([\n  'low',\n  'medium',\n  'high',\n]);\n\nconst complexity =\n  typeof input.complexity === 'string' &&\n  allowedComplexities.has(input.complexity.trim().toLowerCase())\n    ? input.complexity.trim().toLowerCase()\n    : 'low';\n\nreturn [\n  {\n    json: {\n      question,\n      model,\n      openaiModel: model,\n\n      questionType:\n        typeof input.questionType === 'string' &&\n        input.questionType.trim()\n          ? input.questionType.trim()\n          : 'genel',\n\n      complexity,\n\n      agentCount:\n        Number.isInteger(input.agentCount) &&\n        input.agentCount >= 1 &&\n        input.agentCount <= 10\n          ? input.agentCount\n          : 1,\n\n      agentId: input.agentId,\n      role,\n      task,\n    },\n  },\n];"
+      },
+      "id": "b3ba2ebf-d66b-493f-b0f9-c0ce217faa9a",
+      "name": "Validate Worker Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    model: $json.model ?? \"gpt-5-mini\",\n\n    instructions: `Türkçe ve en fazla 110 kelimeyle yalnızca atanan görevi cevapla. Ortak sorudaki diğer uzmanlara ait ölçütleri, ilişkili görünseler bile cevaba alma. Birlikte görülen sonuçlardan neden-sonuç çıkarma. İlk cümlede görevin asıl bulgusunu veya doğrudan cevabını ver. Ardından bu cevabı destekleyen en önemli sayı ya da kanıtı ve ne anlama geldiğini belirt. Görev birden fazla nokta istiyorsa her birine kısa bir cümle ayır. Öneri isteniyorsa atanan ölçütü doğrudan iyileştiren tek uygulanabilir adım ver. Örneğin eksik anket yanıtları için kısa hatırlatma öner. Her sayıyı ve bulguyu bir kez yaz. Veri yetersizse hangi eksikliğin sonucu sınırladığını söyle. Tam dosya hesaplarını esas al. Eksik değer senaryolarını verilen alt ve üst sınırlarla açıkla, bunları ± hata payına dönüştürme; kanıtlanmamış nedenleri varsayım olarak belirt. Yer kazanmak için soru tekrarı, genel özet, görev dışı ölçütler ve sütun listelerini çıkar. Tam cümleler yaz ve üç nokta kullanma.`,\n    input: `Görev: ${$json.task}\n\nSoru ve kanıt:\n${$json.question}`,\n    reasoning: { effort: \"low\" },\n    max_output_tokens: 1536,\n\n    text: {\n      verbosity: \"low\"\n    }\n  }\n}}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_OPENAI_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "OpenAI API"
+        }
+      },
+      "id": "a2ef3ccf-6c85-4c34-93b9-9a7571c6f36f",
+      "name": "Call OpenAI Worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2464,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst source = $('Validate Worker Input').first().json;\n\n// OpenAI Responses API içinden metin çıktısını bul.\nconst rawAnswer = response?.output\n  ?.flatMap((item) =>\n    Array.isArray(item?.content) ? item.content : []\n  )\n  ?.find((item) => item?.type === 'output_text')\n  ?.text;\n\nif (typeof rawAnswer !== 'string' || !rawAnswer.trim()) {\n  throw new Error(\n    'Worker yanıt hatası: ' +\n    source.agentId +\n    ' numaralı Worker OpenAI output_text döndürmedi.'\n  );\n}\n\nconst text = rawAnswer.trim();\nconst words = [...text.matchAll(/\\S+/g)];\nconst needsShortening = words.length > 120 || response.status === 'incomplete' || /(?:…|\\.{3})$/.test(text);\nlet answer = text;\nif (needsShortening) {\n  const end = words.length > 120 ? words[120].index : text.length;\n  const complete = [...new Intl.Segmenter('tr', { granularity: 'sentence' }).segment(text)]\n    .filter(({ segment, index }) => index + segment.trimEnd().length <= end\n      && /[.!?]$/.test(segment.trimEnd()) && !/\\.{3}$/.test(segment.trimEnd()))\n    .at(-1);\n  answer = complete\n    ? text.slice(0, complete.index + complete.segment.trimEnd().length)\n    : 'Uzman bu görev için sınır içinde tamamlanmış bir bulgu sunamadı.';\n}\n\nconst wordCount = answer\n  .split(/\\s+/)\n  .filter(Boolean)\n  .length;\n\nconst containsMarkdownTable =\n  /^\\s*\\|?.*\\|.*$/m.test(answer) &&\n  /^\\s*\\|?\\s*:?-{3,}:?(?:\\s*\\|\\s*:?-{3,}:?)+/m.test(answer);\n\nreturn [\n  {\n    json: {\n      question: source.question,\n      model: source.model ?? 'gpt-5-mini',\n      questionType: source.questionType,\n      complexity: source.complexity,\n      agentCount: source.agentCount,\n      agentId: source.agentId,\n      role: source.role,\n      task: source.task,\n      answer,\n      wordCount,\n      containsMarkdownTable,\n    },\n  },\n];"
+      },
+      "id": "d9bb46e4-2e9f-4c42-9a56-065899f4bc34",
+      "name": "Normalize Worker Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2704,
+        720
+      ]
+    }
+  ],
+  "connections": {
+    "Worker Input": {
+      "main": [
+        [
+          {
+            "node": "Validate Worker Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Worker Input": {
+      "main": [
+        [
+          {
+            "node": "Call OpenAI Worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call OpenAI Worker": {
+      "main": [
+        [
+          {
+            "node": "Normalize Worker Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "85967dcc-625e-497a-8d39-6f8a8133c194",
+  "activeVersionId": "85967dcc-625e-497a-8d39-6f8a8133c194",
+  "versionCounter": 41,
+  "triggerCount": 0,
+  "tags": [],
+  "versionMetadata": {
+    "name": "Version 85967dcc",
+    "description": ""
+  }
+}
