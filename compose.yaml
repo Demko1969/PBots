@@ -53,6 +53,7 @@ services:
       N8N_WEBHOOK_BASE_URL: http://n8n:5678/webhook
       APP_ALLOWED_ORIGINS: http://localhost:${APP_PORT:-3000},http://127.0.0.1:${APP_PORT:-3000}
       INTERNAL_TOKEN_FILE: /run/ortak-akil/token
+      HISTORY_DB_PATH: /app/history/evaluations.sqlite
       SETUP_SERVICE_URL: http://n8n:5689
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
       GOOGLE_DOCS_ENABLED: ${GOOGLE_DOCS_ENABLED:-false}
@@ -65,9 +66,11 @@ services:
       retries: 30
     volumes:
       - internal_access:/run/ortak-akil:ro
+      - evaluation_history:/app/history
     depends_on:
       n8n:
         condition: service_healthy
 volumes:
   n8n_data:
   internal_access:
+  evaluation_history:

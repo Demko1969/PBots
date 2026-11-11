@@ -81,7 +81,7 @@ a claim that all container vulnerabilities have been remediated.
   by this local review.
 - n8n stores credentials and configuration locally. Disabling execution payload
   persistence does not prevent every operational event or error log. Review logs
-  and backups before sharing them. Backups of both named volumes are sensitive.
+  and backups before sharing them. Backups of the named volumes are sensitive. The evaluation history volume can contain questions, CSV excerpts and generated reports. Its API is restricted to the local application origin. The history schema excludes credential fields and redacts recognizable OpenAI key and bearer token formats in stored text.
 - Request limits reduce accidental load. They do not enforce a financial budget.
   A trusted local process can forge browser headers or access the app. The package
   provides no separation between multiple local users or tenants.

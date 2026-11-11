@@ -4,6 +4,7 @@ RUN corepack enable && corepack prepare pnpm@11.20.0 --activate
 COPY ui/package.json ui/pnpm-lock.yaml ui/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY ui/ ./
+RUN mkdir -p /app/history
 RUN SELF_HOSTED=true pnpm build
 
 FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:8ad9cc935b7843c4024b7e1487b5ef472c354ea847b97c667023e2618552607e

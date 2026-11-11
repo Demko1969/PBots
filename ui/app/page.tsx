@@ -57,8 +57,36 @@ type SavedRun = {
 
 const historyKey = "ortak-akil.history.v1";
 
-function readHistory(): SavedRun[] {
-  return JSON.parse(localStorage.getItem(historyKey) ?? "[]");
+async function historyRequest<T>(body: Record<string, unknown>): Promise<T> {
+  const response = await fetch("/api/history", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Yerel geçmişe erişilemedi.");
+  return data as T;
+}
+
+let migration: Promise<void> | undefined;
+
+async function importBrowserHistory() {
+  let entries: SavedRun[];
+  try { entries = JSON.parse(localStorage.getItem(historyKey) ?? "[]"); }
+  catch { return; }
+  if (!Array.isArray(entries) || !entries.length) return;
+  for (const run of entries) await historyRequest({ action: "import", run });
+  try { localStorage.removeItem(historyKey); } catch { /* Imports are idempotent. */ }
+}
+
+async function readHistory() {
+  migration ??= importBrowserHistory().catch(error => {
+    migration = undefined;
+    throw error;
+  });
+  await migration;
+  return (await historyRequest<{ runs: SavedRun[] }>({ action: "list" })).runs;
 }
 
 async function requestId(question: string, model: string, notes: string, source: { name: string; text: string } | null) {
@@ -207,26 +235,35 @@ export default function Home() {
   }
 
   useEffect(() => {
-    function refresh() {
-      try { setHistory(readHistory()); }
-      catch { setHistoryError("Değerlendirme geçmişi okunamadı."); }
+    let mounted = true;
+    async function refresh() {
+      try {
+        const entries = await readHistory();
+        if (mounted) setHistory(entries);
+      } catch {
+        if (mounted) setHistoryError("Değerlendirme geçmişi okunamadı.");
+      }
     }
-    refresh();
-    window.addEventListener("storage", refresh);
-    return () => window.removeEventListener("storage", refresh);
+    void refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      mounted = false;
+      window.removeEventListener("focus", refresh);
+    };
   }, []);
 
-  function saveHistory(change: (entries: SavedRun[]) => SavedRun[]) {
-    const entries = change(readHistory());
-    localStorage.setItem(historyKey, JSON.stringify(entries));
-    setHistory(entries);
-    setHistoryError("");
-  }
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
 
-  function checkpoint(run: SavedRun) {
+  async function checkpoint(run: SavedRun) {
     run.updated = Date.now();
-    try { saveHistory(entries => [run, ...entries.filter(entry => entry.id !== run.id)]); }
-    catch { setHistoryError("Geçmiş kaydedilemedi. Tarayıcı depolama alanını kontrol edin."); }
+    const snapshot = structuredClone(run);
+    const save = saveQueue.current.then(async () => {
+      await historyRequest({ action: "save", run: snapshot });
+      setHistory(entries => [snapshot, ...entries.filter(entry => entry.id !== snapshot.id)]);
+      setHistoryError("");
+    });
+    saveQueue.current = save.catch(() => {});
+    await save;
   }
 
   function openSaved(run: SavedRun, scroll = true) {
@@ -277,7 +314,7 @@ export default function Home() {
           });
           const completed = { ...agent, ...response, status: "done" as const };
           results.push(completed);
-          checkpoint(run);
+          await checkpoint(run);
           updateAgent(agent.agentId, completed);
         } catch (workerError) {
           const message = workerError instanceof Error ? workerError.message : "Uzman çalıştırılamadı";
@@ -302,9 +339,15 @@ export default function Home() {
     submitting.current = true;
     try {
       const requestKey = await requestId(cleanQuestion, model, columnNotes, csvSource);
-      await navigator.locks.request(`ortak-akil:${requestKey}`, { ifAvailable: true }, async lock => {
-        if (!lock) throw new Error("Bu değerlendirme başka bir sekmede çalışıyor.");
-        const saved = readHistory().find(entry => entry.requestKey === requestKey);
+      const token = crypto.randomUUID();
+      await historyRequest({ action: "lock", requestKey, token });
+      const heartbeat = window.setInterval(() => {
+        void historyRequest({ action: "lock", requestKey, token }).catch(() => {});
+      }, 60_000);
+      try {
+        const entries = await readHistory();
+        setHistory(entries);
+        const saved = entries.find(entry => entry.requestKey === requestKey);
         if (saved?.result && !force) {
           openSaved(saved);
           return;
@@ -326,7 +369,7 @@ export default function Home() {
           openaiModel: model,
         });
         run.plan = plan;
-        checkpoint(run);
+        await checkpoint(run);
         const plannedAgents: Agent[] = plan.agents.map(agent =>
           run.answers.find(answer => answer.agentId === agent.agentId) ?? { ...agent, status: "waiting" });
         setAgents(plannedAgents);
@@ -362,9 +405,12 @@ export default function Home() {
         };
         run.result = judge;
         delete run.plan;
-        checkpoint(run);
+        await checkpoint(run);
         openSaved(run, false);
-      });
+      } finally {
+        window.clearInterval(heartbeat);
+        await historyRequest({ action: "unlock", requestKey, token }).catch(() => {});
+      }
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Beklenmeyen bir hata oluştu");
       setStage("error");
@@ -385,7 +431,7 @@ export default function Home() {
       }
       setDocumentUrl(url.href);
       const saved = history.find(entry => entry.id === activeRun.current);
-      if (saved) checkpoint({ ...saved, documentUrl: url.href });
+      if (saved) await checkpoint({ ...saved, documentUrl: url.href });
     } catch (docsError) {
       setError(docsError instanceof Error ? docsError.message : "Google Docs kaydı oluşturulamadı");
     } finally {
@@ -501,8 +547,11 @@ export default function Home() {
               </div>
               <div className="history-actions">
               {run.result && <button type="button" className="text-button" disabled={isBusy || savingDocs} onClick={() => openSaved(run)}>Kayıtlı sonucu aç</button>}
-              <button type="button" className="text-button" disabled={isBusy || savingDocs} onClick={() => {
-                try { saveHistory(entries => entries.filter(entry => entry.id !== run.id)); }
+              <button type="button" className="text-button" disabled={isBusy || savingDocs} onClick={async () => {
+                try {
+                  await historyRequest({ action: "delete", id: run.id });
+                  setHistory(entries => entries.filter(entry => entry.id !== run.id));
+                }
                 catch { setHistoryError("Kayıt silinemedi."); }
               }}>Sil</button>
               </div>
