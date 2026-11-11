@@ -18,6 +18,12 @@ Docker, arayüz bağımlılıklarını imajın içinde kurar. Bu kurulum için b
 
 Yedekleme, Google Docs ve sorun giderme için [yerel kurulum kılavuzuna](deployment/README.md) bakın. Dağıtım kontrolleri ve bilinen sınırlar [SECURITY.md](SECURITY.md) dosyasındadır. Yerel kaynak ZIP’i `python3 scripts/package-release.py` ile hazırlanabilir.
 
+## Değerlendirme geçmişi
+
+Uygulama tamamlanan sonuçları, uzman yanıtlarını, diyagramı ve varsa Google Docs bağlantısını tarayıcıda saklar. Aynı soru, model, CSV dosyası ve sütun açıklamaları tekrar gönderildiğinde kayıtlı sonuç yeni OpenAI isteği olmadan açılır. Yarım kalan bir çalışmada kaydedilmiş plan ve uzman yanıtları yeniden kullanılır. Kesinti sırasında yanıtı henüz kaydedilmemiş çağrılar tekrar çalıştırılabilir.
+
+**Yeniden çalıştır** yeni bir değerlendirme başlatır ve OpenAI kullanımı oluşturur. Geçmiş tarayıcı profiline ve uygulama adresine bağlıdır. Uygulamayı başka bir tarayıcıda açmak eski kayıtları silmez. Her tarayıcı kendi geçmişini gösterir ve diğer tarayıcıdaki kayıtları yeniden kullanamaz. Tarayıcının site verileri silindiğinde geçmiş de silinir. Tek bir kaydı geçmişten **Sil** ile kaldırabilirsiniz. Kayıtlar API anahtarı veya ham CSV dosyası içermez, ancak sonuçlar ve kaydedilmiş çalışma planı CSV’den alınan örnekler ve özetler içerebilir.
+
 ## Bileşenler
 
 - `workflows/multi-agent-planner.json`: gerekli uzman rollerini üretir.

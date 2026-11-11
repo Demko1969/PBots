@@ -3,7 +3,7 @@
 import { downloadSolutionDiagram, renderSolutionDiagram, solutionFlow, type SolutionFlow } from "../lib/diagram";
 import Setup, { type SetupStatus } from "../components/Setup";
 import { MAX_CSV_BYTES, parseCsv, profileTable, tableQuestion } from "../lib/table";
-import { Fragment, type FormEvent, type ReactNode, useMemo, useRef, useState } from "react";
+import { Fragment, type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 type Stage = "idle" | "planning" | "working" | "judging" | "complete" | "error";
 type AgentStatus = "waiting" | "working" | "done" | "error";
@@ -42,6 +42,30 @@ type JudgeResult = {
   diagram?: SolutionFlow;
   displayAnswer?: string;
 };
+
+type SavedRun = {
+  id: string;
+  requestKey: string;
+  question: string;
+  model: string;
+  updated: number;
+  plan?: Plan;
+  answers: Agent[];
+  result?: JudgeResult;
+  documentUrl?: string;
+};
+
+const historyKey = "ortak-akil.history.v1";
+
+function readHistory(): SavedRun[] {
+  return JSON.parse(localStorage.getItem(historyKey) ?? "[]");
+}
+
+async function requestId(question: string, model: string, notes: string, source: { name: string; text: string } | null) {
+  const bytes = new TextEncoder().encode(JSON.stringify([question, model, source?.name, source?.text, source ? notes.trim() : ""]));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
 
 // Selection guidance checked against https://developers.openai.com/api/docs/models on 2026-11-08.
 const modelOptions = [
@@ -161,6 +185,62 @@ export default function Home() {
   const [documentUrl, setDocumentUrl] = useState("");
   const [savingDocs, setSavingDocs] = useState(false);
 
+  const [history, setHistory] = useState<SavedRun[]>([]);
+  const [historyError, setHistoryError] = useState("");
+  const activeRun = useRef<string | null>(null);
+  const submitting = useRef(false);
+  const workspace = useRef<HTMLElement>(null);
+  const scrollPending = useRef(false);
+  const [scrollRequest, setScrollRequest] = useState(0);
+  const showWorkspace = agents.length > 0 || !!result || stage === "planning" || stage === "error";
+
+  useEffect(() => {
+    if (!scrollPending.current || !workspace.current) return;
+    scrollPending.current = false;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    workspace.current.scrollIntoView({ block: "start", behavior: reducedMotion ? "instant" : "smooth" });
+  }, [scrollRequest, showWorkspace]);
+
+  function showResults() {
+    scrollPending.current = true;
+    setScrollRequest(value => value + 1);
+  }
+
+  useEffect(() => {
+    function refresh() {
+      try { setHistory(readHistory()); }
+      catch { setHistoryError("Değerlendirme geçmişi okunamadı."); }
+    }
+    refresh();
+    window.addEventListener("storage", refresh);
+    return () => window.removeEventListener("storage", refresh);
+  }, []);
+
+  function saveHistory(change: (entries: SavedRun[]) => SavedRun[]) {
+    const entries = change(readHistory());
+    localStorage.setItem(historyKey, JSON.stringify(entries));
+    setHistory(entries);
+    setHistoryError("");
+  }
+
+  function checkpoint(run: SavedRun) {
+    run.updated = Date.now();
+    try { saveHistory(entries => [run, ...entries.filter(entry => entry.id !== run.id)]); }
+    catch { setHistoryError("Geçmiş kaydedilemedi. Tarayıcı depolama alanını kontrol edin."); }
+  }
+
+  function openSaved(run: SavedRun, scroll = true) {
+    if (!run.result) return;
+    activeRun.current = run.id;
+    setResult(run.result);
+    setAgents(run.answers);
+    setDocumentUrl(run.documentUrl ?? "");
+    setSelected("final");
+    setError("");
+    setStage("complete");
+    if (scroll) showResults();
+  }
+
   const completedCount = agents.filter(agent => agent.status === "done").length;
   const selectedAgent = useMemo(
     () => typeof selected === "number" ? agents.find(agent => agent.agentId === selected) : undefined,
@@ -175,8 +255,8 @@ export default function Home() {
     setAgents(current => current.map(agent => agent.agentId === agentId ? { ...agent, ...patch } : agent));
   }
 
-  async function runWorkerPool(plan: Plan, plannedAgents: Agent[]) {
-    const results: Agent[] = [];
+  async function runWorkerPool(plan: Plan, plannedAgents: Agent[], run: SavedRun) {
+    const results = run.answers;
     let cursor = 0;
     const workerCount = Math.min(2, plannedAgents.length);
 
@@ -197,6 +277,7 @@ export default function Home() {
           });
           const completed = { ...agent, ...response, status: "done" as const };
           results.push(completed);
+          checkpoint(run);
           updateAgent(agent.agentId, completed);
         } catch (workerError) {
           const message = workerError instanceof Error ? workerError.message : "Uzman çalıştırılamadı";
@@ -206,65 +287,89 @@ export default function Home() {
       }
     }
 
-    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    const outcomes = await Promise.allSettled(Array.from({ length: workerCount }, () => worker()));
+    for (const outcome of outcomes) {
+      if (outcome.status === "rejected") throw outcome.reason;
+    }
     return results.sort((a, b) => a.agentId - b.agentId);
   }
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
+  async function runEvaluation(force = false) {
     const cleanQuestion = question.trim();
-    if (!cleanQuestion || isBusy || setupBlocked || readingCsv || csvError || csv.error || (csv.table && !tableConfirmed)) return;
+    const model = openaiModel.trim();
+    if (!cleanQuestion || !model || submitting.current || savingDocs || readingCsv || csvError || csv.error || (csv.table && !tableConfirmed)) return;
 
-    setError("");
-    setResult(null);
-    setDocumentUrl("");
-    setAgents([]);
-    setSelected("final");
-    setStage("planning");
-
+    submitting.current = true;
     try {
-      const plan = await postStage<Plan>("plan", {
-        question: csv.table ? tableQuestion(cleanQuestion, csv.table, columnNotes) : cleanQuestion,
-        openaiModel: openaiModel.trim() || "gpt-5-mini",
+      const requestKey = await requestId(cleanQuestion, model, columnNotes, csvSource);
+      await navigator.locks.request(`ortak-akil:${requestKey}`, { ifAvailable: true }, async lock => {
+        if (!lock) throw new Error("Bu değerlendirme başka bir sekmede çalışıyor.");
+        const saved = readHistory().find(entry => entry.requestKey === requestKey);
+        if (saved?.result && !force) {
+          openSaved(saved);
+          return;
+        }
+        if (setupBlocked) throw new Error("Yeni değerlendirme için OpenAI bağlantısını kurun.");
+
+        const run: SavedRun = (!force && saved) || { id: crypto.randomUUID(), requestKey, question: cleanQuestion, model, updated: Date.now(), answers: [] };
+        activeRun.current = null;
+        setError("");
+        setResult(null);
+        setDocumentUrl("");
+        setAgents([]);
+        setSelected("final");
+        setStage("planning");
+        showResults();
+
+        const plan = run.plan ?? await postStage<Plan>("plan", {
+          question: csv.table ? tableQuestion(cleanQuestion, csv.table, columnNotes) : cleanQuestion,
+          openaiModel: model,
+        });
+        run.plan = plan;
+        checkpoint(run);
+        const plannedAgents: Agent[] = plan.agents.map(agent =>
+          run.answers.find(answer => answer.agentId === agent.agentId) ?? { ...agent, status: "waiting" });
+        setAgents(plannedAgents);
+        setStage("working");
+
+        const answers = await runWorkerPool(plan, plannedAgents.filter(agent => agent.status !== "done"), run);
+        setStage("judging");
+        const judgeResponse = await postStage<JudgeResult>("judge", {
+          question: plan.question,
+          openaiModel: plan.openaiModel ?? plan.model,
+          questionType: plan.questionType,
+          complexity: plan.complexity,
+          agentCount: plan.agentCount,
+          answers,
+        });
+        // UI yalnızca sunulacak nihai cevap ve uzman kaynaklarını saklar.
+        // Judge'ın iç çalışma/denetim alanları arayüz sözleşmesine alınmaz.
+        const judge: JudgeResult = {
+          question: judgeResponse.question,
+
+          model: judgeResponse.model,
+          openaiModel: judgeResponse.openaiModel,
+          questionType: judgeResponse.questionType,
+          complexity: judgeResponse.complexity,
+          agentCount: judgeResponse.agentCount,
+          answers: judgeResponse.answers,
+
+          summaryPoints: judgeResponse.summaryPoints ?? [],
+          detailedAnswer: judgeResponse.detailedAnswer,
+          finalAnswer: judgeResponse.finalAnswer,
+          diagram: judgeResponse.diagram,
+          displayAnswer: judgeResponse.displayAnswer,
+        };
+        run.result = judge;
+        delete run.plan;
+        checkpoint(run);
+        openSaved(run, false);
       });
-      const plannedAgents: Agent[] = plan.agents.map(agent => ({ ...agent, status: "waiting" }));
-      setAgents(plannedAgents);
-      setStage("working");
-
-      const answers = await runWorkerPool(plan, plannedAgents);
-      setStage("judging");
-      const judgeResponse = await postStage<JudgeResult>("judge", {
-        question: plan.question,
-        openaiModel: plan.openaiModel ?? plan.model,
-        questionType: plan.questionType,
-        complexity: plan.complexity,
-        agentCount: plan.agentCount,
-        answers,
-      });
-      // UI yalnızca sunulacak nihai cevap ve uzman kaynaklarını saklar.
-      // Judge'ın iç çalışma/denetim alanları arayüz sözleşmesine alınmaz.
-      const judge: JudgeResult = {
-  question: judgeResponse.question,
-
-  model: judgeResponse.model,
-  openaiModel: judgeResponse.openaiModel,
-  questionType: judgeResponse.questionType,
-  complexity: judgeResponse.complexity,
-  agentCount: judgeResponse.agentCount,
-  answers: judgeResponse.answers,
-
-  summaryPoints: judgeResponse.summaryPoints ?? [],
-  detailedAnswer: judgeResponse.detailedAnswer,
-  finalAnswer: judgeResponse.finalAnswer,
-  diagram: judgeResponse.diagram,
-  displayAnswer: judgeResponse.displayAnswer,
-      };
-      setResult(judge);
-      setSelected("final");
-      setStage("complete");
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Beklenmeyen bir hata oluştu");
       setStage("error");
+    } finally {
+      submitting.current = false;
     }
   }
 
@@ -279,6 +384,8 @@ export default function Home() {
         throw new Error("Google Docs bağlantısı doğrulanamadı.");
       }
       setDocumentUrl(url.href);
+      const saved = history.find(entry => entry.id === activeRun.current);
+      if (saved) checkpoint({ ...saved, documentUrl: url.href });
     } catch (docsError) {
       setError(docsError instanceof Error ? docsError.message : "Google Docs kaydı oluşturulamadı");
     } finally {
@@ -303,7 +410,7 @@ export default function Home() {
           <span className="eyebrow">Yeni değerlendirme</span>
           <h1 aria-label="Bir soruyu, doğru uzmanlarla birlikte düşünün.">Bir soruyu, <span className="heading-highlight">doğru uzmanlarla</span> birlikte düşünün.</h1>
         </div>
-        <form className="question-form" onSubmit={handleSubmit}>
+        <form className="question-form" onSubmit={event => { event.preventDefault(); void runEvaluation(); }}>
           <label htmlFor="question">Değerlendirilecek soru</label>
           <textarea
             id="question"
@@ -375,16 +482,40 @@ export default function Home() {
           </div>
           <div className="form-footer">
             <button type="button" className="text-button" onClick={() => setQuestion(exampleQuestion)} disabled={isBusy}>Örnek soruyu kullan</button>
+            <button type="button" className="text-button" disabled={!question.trim() || !openaiModel.trim() || isBusy || savingDocs || setupBlocked || readingCsv} onClick={() => void runEvaluation(true)}>Yeniden çalıştır</button>
             <span className="shortcut">⌘ + Enter</span>
-            <button className="primary-button" type="submit" aria-busy={isBusy} aria-label={isBusy ? stageCopy[stage] : undefined} disabled={!question.trim() || !openaiModel.trim() || isBusy || setupBlocked || readingCsv || !!csvError || !!csv.error || (!!csv.table && !tableConfirmed)}>
+            <button className="primary-button" type="submit" aria-busy={isBusy} aria-label={isBusy ? stageCopy[stage] : undefined} disabled={!question.trim() || !openaiModel.trim() || isBusy || savingDocs || readingCsv || !!csvError || !!csv.error || (!!csv.table && !tableConfirmed)}>
               {isBusy ? <span className="button-wait-pulse" aria-hidden="true" /> : <>Uzmanları çalıştır <span>→</span></>}
             </button>
           </div>
         </form>
+        <details className="question-form run-history">
+          <summary>Değerlendirme geçmişi ({history.length})</summary>
+          {history.length === 0 && <p>Kayıtlı değerlendirme yok.</p>}
+          {history.length > 0 && <ul className="history-list">
+          {history.map(run => (
+            <li className="history-entry" key={run.id}>
+              <div>
+                <strong>{run.question}</strong>
+                <small>{run.model} · {new Date(run.updated).toLocaleString("tr-TR")} · {run.result ? "Tamamlandı" : "Yarım kaldı"}</small>
+              </div>
+              <div className="history-actions">
+              {run.result && <button type="button" className="text-button" disabled={isBusy || savingDocs} onClick={() => openSaved(run)}>Kayıtlı sonucu aç</button>}
+              <button type="button" className="text-button" disabled={isBusy || savingDocs} onClick={() => {
+                try { saveHistory(entries => entries.filter(entry => entry.id !== run.id)); }
+                catch { setHistoryError("Kayıt silinemedi."); }
+              }}>Sil</button>
+              </div>
+            </li>
+          ))}
+          </ul>}
+          <p>Aynı soru, CSV, sütun açıklaması ve modelle gönderdiğinizde kayıtlı sonuç açılır veya yarım kalan değerlendirme sürer.</p>
+        </details>
+        {historyError && <p role="alert">{historyError}</p>}
       </section>
 
-      {(agents.length > 0 || result || stage === "error") && (
-        <section className="workspace" aria-live="polite">
+      {showWorkspace && (
+        <section ref={workspace} className="workspace" aria-live="polite">
           <aside className="agent-rail">
             <div className="rail-heading">
               <div><span className="eyebrow">Çalışma ekibi</span><h2>Uzmanlar</h2></div>
