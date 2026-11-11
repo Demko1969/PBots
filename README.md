@@ -14,7 +14,7 @@ Bu proje bir soruyu bağımsız uzman rollerine böler, uzman yanıtlarını par
 3. [Yerel uygulamayı açın](http://localhost:3000). Kurulum ekranındaki bağlantıdan yerel n8n yönetici hesabınızı oluşturun. Ardından uygulamaya dönüp **kendi OpenAI API anahtarınızı** girin. Sekiz iş akışı otomatik kurulur. İlk kurulum Docker imajlarını indirdiği için birkaç dakika sürebilir.
 4. **Örnek soruyu kullan** ve ardından **Uzmanları çalıştır** düğmesine basın. CSV denemesi için `ui/tests/fixtures/support.csv` dosyasını yükleyebilirsiniz. Nihai sonuçtaki **Çözüm akışını göster** düğmesi diyagramı açar ve SVG olarak indirmenizi sağlar.
 
-Docker kurulumunda bilgisayarınıza ayrıca Node.js kurmanız gerekmez. Gerçek değerlendirmeler OpenAI API kullanımı oluşturur. Google Docs aktarımı isteğe bağlıdır ve kendi Google bağlantınızı gerektirir.
+Docker, arayüz bağımlılıklarını imajın içinde kurar. Bu kurulum için bilgisayarınızda Node.js, npm veya `node_modules` klasörü gerekmez. Gerçek değerlendirmeler OpenAI API kullanımı oluşturur. Google Docs aktarımı isteğe bağlıdır ve kendi Google bağlantınızı gerektirir.
 
 Yedekleme, Google Docs ve sorun giderme için [yerel kurulum kılavuzuna](deployment/README.md) bakın. Dağıtım kontrolleri ve bilinen sınırlar [SECURITY.md](SECURITY.md) dosyasındadır. Yerel kaynak ZIP’i `python3 scripts/package-release.py` ile hazırlanabilir.
 

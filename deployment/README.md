@@ -123,11 +123,11 @@ The setup automation uses the documented n8n
 
 ## Download and daily use
 
-Download the reviewed source ZIP attached to a release, extract it and run the
-launcher from the extracted folder. Keep the folder so Docker Compose can find
-its configuration. A distributor can publish the archive and its SHA-256 file
-as GitHub release assets after reviewing `SECURITY.md`. Source changes in a local
-checkout do not appear on GitHub until committed and pushed.
+On the GitHub repository page, choose **Code → Download ZIP**, or clone the
+repository. If you downloaded the ZIP, extract it first. Run the launcher from
+the project folder so Docker Compose can find its configuration. Docker installs
+the UI dependencies inside the image. You do not need Node.js, npm, or a local
+`node_modules` folder for this installation.
 
 After installation, open the app, enter a question, optionally attach a CSV,
 review its preview and column notes, then run the experts. Use the default model
