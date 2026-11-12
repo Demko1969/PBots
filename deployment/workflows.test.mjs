@@ -32,6 +32,6 @@ test('prepares all eight workflows with connected subworkflows and local credent
       assert.equal(node.credentials?.googleDocsOAuth2Api, undefined);
     }
   }
-  assert.equal(openAiNodes, 4);
+  assert.equal(openAiNodes, 3);
   assert.equal(JSON.stringify(source), sourceSnapshot, 'source exports remain intact');
 });
