@@ -65,8 +65,13 @@ for (const [id, file] of expected) {
       if (headers.some(header => header.name?.toLowerCase() === 'authorization')) {
         errors.push(`${file}/${node.name}: Authorization must not be stored in workflow headers`);
       }
-      if (node.parameters.options?.timeout !== 900000) {
-        errors.push(`${file}/${node.name}: OpenAI timeout must be 900000 ms`);
+      const timeout = file === 'multi-agent-judge.json' && node.name === 'Compare Independent Findings' ? 30_000 : 900_000;
+      if (node.parameters.options?.timeout !== timeout) {
+        errors.push(`${file}/${node.name}: OpenAI timeout must be ${timeout} ms`);
+      }
+      if (node.parameters.options?.redirect?.redirect?.followRedirects !== false ||
+          !/\bstore:\s*false\b/.test(node.parameters.jsonBody)) {
+        errors.push(`${file}/${node.name}: disable both redirects and response storage`);
       }
     }
   }
@@ -116,6 +121,15 @@ for (const id of ['FQaBhDfItsZvVTNf', 'dWKIaKeVID1i2XTs', 'mOkdCDiQB67MDpCB', 'B
   if (webhooks.length !== 1 || responses.length !== 1) {
     errors.push(`${workflow.name}: expected one Webhook and one Respond to Webhook node`);
   }
+  if (workflow.active !== false || webhooks.some(node => node.parameters.authentication !== 'headerAuth')) {
+    errors.push(`${workflow.name}: webhook exports must be inactive and require Header Auth`);
+  }
+}
+
+const chat = workflows.get('nf1usCSYXipWNQH9');
+const chatTrigger = chat?.nodes.find(node => node.type === '@n8n/n8n-nodes-langchain.chatTrigger');
+if (chat?.active !== false || chatTrigger?.parameters.public !== false || chatTrigger?.parameters.authentication !== 'n8nUserAuth') {
+  errors.push('Chat Trigger must be exported inactive and restricted to the n8n editor');
 }
 
 const serialized = [...workflows.values()].map(workflow => JSON.stringify(workflow)).join('\n');

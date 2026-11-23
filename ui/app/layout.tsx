@@ -12,7 +12,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: "Ortak Akıl — Çoklu Uzman Karar Alanı",
     description,
-    icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+    icons: { icon: "/ortak-akil-lens.svg", shortcut: "/ortak-akil-lens.svg" },
     openGraph: {
       title: "Ortak Akıl",
       description,

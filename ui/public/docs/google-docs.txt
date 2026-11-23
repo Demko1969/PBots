@@ -1,0 +1,14 @@
+İsteğe bağlı Google Docs çıktısı
+
+1. Google Cloud'da Google Drive ve Google Docs API'lerini açın. n8n'deki
+   Google Drive OAuth2 ve Google Docs OAuth2 credential bağlantılarını kurun.
+2. Multi-Agent UI - Google Docs API iş akışında ilgili credential'ları seçin.
+   REPLACE_WITH_GOOGLE_DRIVE_FOLDER_ID değerini hedef klasör kimliğiyle değiştirin.
+3. Webhook üzerinde X-Multi-Agent-Key Header Auth credential'ını seçin ve
+   klasörün paylaşım ayarlarını kontrol edin. Ardından iş akışını yayınlayın.
+4. Docker için GOOGLE_DOCS_ENABLED=true bash scripts/start.sh komutunu kullanın.
+   Elle kurulum için ui/.env.local dosyasında GOOGLE_DOCS_ENABLED=true ayarlayın
+   ve UI sunucusunu yeniden başlatın.
+
+Aktarım, soru metnini ve kısa karar raporunu Google'a gönderir. Ek dosyaların
+ham içeriği ve bağımsız uzman yanıtları Docs aktarımının parçası değildir.

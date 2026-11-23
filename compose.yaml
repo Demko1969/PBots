@@ -26,6 +26,7 @@ services:
       WEBHOOK_URL: http://localhost:${N8N_EDITOR_PORT:-5680}/
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
       EXECUTIONS_DATA_SAVE_ON_ERROR: none
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "false"
       EXECUTIONS_DATA_PRUNE: "true"
       GENERIC_TIMEZONE: ${TZ:-Europe/Paris}
     volumes:

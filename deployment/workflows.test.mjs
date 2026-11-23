@@ -11,14 +11,23 @@ test('prepares all eight workflows with connected subworkflows and local credent
   assert.equal(ids.size, 8);
   for (const id of PUBLISHED_IDS) assert.ok(ids.has(id));
   let openAiNodes = 0;
+  let webhookNodes = 0;
   for (const workflow of prepared) {
     assert.equal(workflow.active, false);
     assert.equal(workflow.shared, undefined);
     assert.equal(workflow.activeVersionId, undefined);
     for (const node of workflow.nodes) {
       if (node.type === 'n8n-nodes-base.webhook') {
+        const manual = source.find(entry => entry.id === workflow.id);
+        assert.equal(manual.active, false);
+        assert.equal(manual.nodes.find(entry => entry.id === node.id).parameters.authentication, 'headerAuth');
         assert.equal(node.parameters.authentication, 'headerAuth');
         assert.equal(node.credentials.httpHeaderAuth.id, WEBHOOK_CREDENTIAL_ID);
+        webhookNodes++;
+      }
+      if (node.type === '@n8n/n8n-nodes-langchain.chatTrigger') {
+        assert.equal(node.parameters.public, false);
+        assert.equal(node.parameters.authentication, 'n8nUserAuth');
       }
       if (node.type === 'n8n-nodes-base.executeWorkflow') {
         assert.ok(ids.has(node.parameters.workflowId.value));
@@ -32,6 +41,7 @@ test('prepares all eight workflows with connected subworkflows and local credent
       assert.equal(node.credentials?.googleDocsOAuth2Api, undefined);
     }
   }
-  assert.equal(openAiNodes, 3);
+  assert.equal(openAiNodes, 4);
+  assert.equal(webhookNodes, 4);
   assert.equal(JSON.stringify(source), sourceSnapshot, 'source exports remain intact');
 });
