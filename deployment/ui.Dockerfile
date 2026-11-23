@@ -7,7 +7,7 @@ COPY ui/ ./
 RUN mkdir -p /app/history
 RUN SELF_HOSTED=true pnpm build
 
-FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:8ad9cc935b7843c4024b7e1487b5ef472c354ea847b97c667023e2618552607e
+FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:39c66687298417dbf3ff2fb8b6012c20554494e16414ef7afd07b9abbb45b501
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build --chown=1000:1000 /app /app

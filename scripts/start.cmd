@@ -7,7 +7,8 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-docker compose --env-file deployment/compose.env up --build -d --wait --wait-timeout 300
+set "COMPOSE_DISABLE_ENV_FILE=1"
+docker compose up --build -d --wait --wait-timeout 300
 if errorlevel 1 (
   echo Startup failed. Review the messages above.
   pause

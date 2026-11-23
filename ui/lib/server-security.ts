@@ -7,7 +7,8 @@ export class RequestError extends Error {
 export function checkRequest(request: Request, write = true) {
   const url = new URL(request.url);
   const allowed = process.env.APP_ALLOWED_ORIGINS?.split(",").map(value => value.trim());
-  if (allowed && !allowed.includes(url.origin)) throw new RequestError("İzin verilmeyen adres.", 403);
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (allowed ? !allowed.includes(url.origin) : !loopback) throw new RequestError("İzin verilmeyen adres.", 403);
   if (write && (request.headers.get("origin") !== url.origin || request.headers.get("sec-fetch-site") === "cross-site")) {
     throw new RequestError("Geçersiz istek kaynağı.", 403);
   }
@@ -44,13 +45,13 @@ export async function readJson(request: Pick<Request, "body">, limit: number): P
 }
 
 export async function internalHeaders() {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (process.env.INTERNAL_TOKEN_FILE) {
-    headers["X-Multi-Agent-Key"] = (await readFile(process.env.INTERNAL_TOKEN_FILE, "utf8")).trim();
-  } else if (process.env.N8N_WEBHOOK_SECRET) {
-    headers["X-Multi-Agent-Key"] = process.env.N8N_WEBHOOK_SECRET;
+  const token = process.env.INTERNAL_TOKEN_FILE
+    ? await readFile(process.env.INTERNAL_TOKEN_FILE, "utf8").then(value => value.trim(), () => undefined)
+    : process.env.N8N_WEBHOOK_SECRET;
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) {
+    throw new RequestError("İş akışı erişim anahtarı yapılandırılmadı.", 503);
   }
-  return headers;
+  return { "Content-Type": "application/json", "X-Multi-Agent-Key": token };
 }
 
 let activeRequests = 0;

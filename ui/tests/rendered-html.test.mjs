@@ -22,14 +22,17 @@ test("server-renders the multi-agent workspace", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Ortak Akıl/);
-  assert.match(html, /Bir soruyu, doğru uzmanlarla birlikte düşünün/);
+  assert.match(html, /Değerlendirilecek soru/);
+  assert.match(html, /<aside[^>]+aria-labelledby="history-title"/);
+  assert.ok(html.indexOf("Uzmanları çalıştır") < html.indexOf("id=\"evaluation-settings\""));
   assert.match(html, /Uzmanları çalıştır/);
-  assert.match(html, /<select[^>]+id="openai-model"/);
+  assert.match(html, /<button[^>]+id="openai-model"[^>]+aria-controls="model-choices"/);
+  assert.match(html, /<div[^>]+id="model-choices"[^>]+popover="manual"/);
   assert.match(html, /Başka bir model kullan/);
   assert.doesNotMatch(html, /datalist|csv-delimiter|<footer|UTF-8 ·/);
-  assert.ok(html.indexOf('value="gpt-6-astra"') < html.indexOf('value="gpt-6.1-sol"'));
-  assert.ok(html.indexOf('value="gpt-6.1-sol"') < html.indexOf('value="gpt-6.1-terra"'));
-  assert.ok(html.indexOf('value="gpt-6.1-terra"') < html.indexOf('value="gpt-6-luna"'));
+  assert.ok(html.indexOf('data-model="gpt-6-astra"') < html.indexOf('data-model="gpt-6.1-sol"'));
+  assert.ok(html.indexOf('data-model="gpt-6.1-sol"') < html.indexOf('data-model="gpt-6.1-terra"'));
+  assert.ok(html.indexOf('data-model="gpt-6.1-terra"') < html.indexOf('data-model="gpt-6-luna"'));
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
 

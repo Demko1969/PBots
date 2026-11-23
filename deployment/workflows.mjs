@@ -16,6 +16,10 @@ export function secureWebhooks(workflow) {
       node.parameters.authentication = 'headerAuth';
       node.credentials = { ...node.credentials, httpHeaderAuth: { id: WEBHOOK_CREDENTIAL_ID, name: 'Ortak Akıl internal access' } };
     }
+    if (node.type === '@n8n/n8n-nodes-langchain.chatTrigger') {
+      node.parameters.public = false;
+      node.parameters.authentication = 'n8nUserAuth';
+    }
   }
   return workflow;
 }

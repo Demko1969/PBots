@@ -13,8 +13,10 @@ Web sunucusu `OPENAI_MODEL` değerini kullanıcıya başlangıç önerisi olarak
 
 ## Güvenlik sınırı
 
-OpenAI API anahtarı yalnızca n8n Header Auth credential'ında tutulur. Git deposuna credential değeri, Authorization başlığı veya başka bir sır eklenmez.
+OpenAI API anahtarı yalnızca n8n Header Auth credential'ında tutulur. UI webhook’ları ayrı bir `X-Multi-Agent-Key` credential’ı gerektirir. Web sunucusu geçerli biçimde yapılandırılmış bir sunucu anahtarı olmadan webhook isteği göndermez. Dışa aktarılan webhook ve sohbet akışları etkin değildir. Sohbet akışı n8n editörüyle sınırlıdır.
+
+Yerel SQLite, değerlendirme geçmişi ile aynı istek anahtarının eş zamanlı yürütülmesini önleyen süreli kilitleri saklar. `showDiagram` ve `diagramIssue` geçmişte korunur. CSV önizlemesindeki tanınabilir kimlik bilgileri yazma sırasında gizlenir.
 
 ## Kaynak gerçek ve senkronizasyon
 
-n8n kaynak gerçektir. `scripts/sync-n8n.sh`, tanımlı sekiz n8n workflow ID'sini aynı adla var olan `workflows/` dosyalarına atomik olarak aktarır. Tanımsız workflow'ları dışa aktarmaz.
+n8n kaynak gerçektir. `scripts/sync-n8n.sh`, tanımlı sekiz n8n workflow ID'sini çalışma dizinine yazmadan önce doğrular, sabitlenmiş örnek verileri temizler ve `workflows/` dosyalarını günceller. Değişiklikleri commit etmeden önce inceleyin.

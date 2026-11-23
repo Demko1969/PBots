@@ -6,3 +6,10 @@ node_modules/
 output/
 tmp/
 *.tsbuildinfo
+*.sqlite*
+*.db
+*.bak
+*.pem
+*.key
+/package-lock.json
+/design-previews/

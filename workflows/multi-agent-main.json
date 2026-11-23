@@ -4,7 +4,7 @@
   "id": "nf1usCSYXipWNQH9",
   "name": "Multi-Agent Main2",
   "description": null,
-  "active": true,
+  "active": false,
   "isArchived": false,
   "nodes": [
     {
@@ -29,7 +29,13 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ { requests: $('Build Google Docs Report').first().json.docsStyleRequests } }}",
-        "options": {}
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
       },
       "id": "be6d01a1-93ab-45e3-beae-c6a8ebd035b0",
       "name": "Apply Google Docs Formatting",
@@ -228,6 +234,8 @@
     },
     {
       "parameters": {
+        "public": false,
+        "authentication": "n8nUserAuth",
         "options": {
           "responseMode": "lastNode"
         }

@@ -4,12 +4,13 @@
   "id": "BdWFAQzKCellIUN5",
   "name": "Multi-Agent UI - Google Docs API",
   "description": null,
-  "active": true,
+  "active": false,
   "isArchived": false,
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
+        "authentication": "headerAuth",
         "path": "multi-agent-ui-docs",
         "responseMode": "responseNode",
         "options": {}
@@ -96,7 +97,13 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ { requests: $('Build Google Docs Report').first().json.docsStyleRequests } }}",
-        "options": {}
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
       },
       "id": "55e922a8-7e44-476a-a81b-68c701227bb7",
       "name": "Apply Google Docs Formatting",

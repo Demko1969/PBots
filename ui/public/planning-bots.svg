@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <symbol id="bot-1" viewBox="-38 -37 76 64">
+    <g>
+      <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0-17v-10m0 0-7-6m7 6 7-6" />
+        <ellipse rx="30" ry="17" fill="var(--robot-fill, none)" />
+      </g>
+      <g fill="var(--robot-eyes, currentColor)">
+        <circle cx="-7" cy="0" r="2.8" />
+        <circle cx="7" cy="0" r="2.8" />
+      </g>
+    </g>
+  </symbol>
+  <symbol id="bot-2" viewBox="-38 -37 76 64">
+    <g>
+      <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0-17v-7" />
+        <circle cy="-28" r="4" />
+        <rect x="-24" y="-17" width="48" height="34" rx="9" fill="var(--robot-fill, none)" />
+      </g>
+      <g fill="var(--robot-eyes, currentColor)">
+        <circle cx="-7" cy="0" r="2.8" />
+        <circle cx="7" cy="0" r="2.8" />
+      </g>
+    </g>
+  </symbol>
+  <symbol id="bot-3" viewBox="-38 -37 76 64">
+    <g>
+      <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0-17v-10" />
+        <path d="M-11-17h22L23-6V6L11 17h-22L-23 6V-6Z" fill="var(--robot-fill, none)" />
+      </g>
+      <g fill="var(--robot-eyes, currentColor)">
+        <circle cx="-7" cy="0" r="2.8" />
+        <circle cx="7" cy="0" r="2.8" />
+      </g>
+    </g>
+  </symbol>
+  <symbol id="bot-4" viewBox="-38 -37 76 64">
+    <g>
+      <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0-21V-29" />
+        <circle cy="-33" r="4" />
+        <path d="M-6-17Q0-25 6-17L26 13Q30 20 22 20H-22Q-30 20-26 13Z" fill="var(--robot-fill, none)" />
+      </g>
+      <g fill="var(--robot-eyes, currentColor)">
+        <circle cx="-7" cy="7" r="2.8" />
+        <circle cx="7" cy="7" r="2.8" />
+      </g>
+    </g>
+  </symbol>
+  <symbol id="bot-5" viewBox="-38 -37 76 64">
+    <g>
+      <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0-21v-8" />
+        <path d="M-5-19Q0-23 5-19L25-4Q31 0 25 4L5 19Q0 23-5 19L-25 4Q-31 0-25-4Z" fill="var(--robot-fill, none)" />
+      </g>
+      <g fill="var(--robot-eyes, currentColor)">
+        <circle cx="-7" cy="0" r="2.8" />
+        <circle cx="7" cy="0" r="2.8" />
+      </g>
+    </g>
+  </symbol>
+  <symbol id="bot-6" viewBox="-38 -37 76 64">
+    <g>
+      <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0-22v-6m0-8 4 4-4 4-4-4Z" />
+        <path d="M-28-6Q-29-11-23-13L-3-21Q0-22 3-21l20 8q6 2 5 7l-6 20q-1 4-6 4h-32q-5 0-6-4Z" fill="var(--robot-fill, none)" />
+      </g>
+      <g fill="var(--robot-eyes, currentColor)">
+        <circle cx="-7" cy="1" r="2.8" />
+        <circle cx="7" cy="1" r="2.8" />
+      </g>
+    </g>
+  </symbol>
+  <symbol id="bot-7" viewBox="-38 -37 76 64">
+    <g>
+      <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M-9-20l-4-8m22 8 4-8" />
+        <circle cx="-14" cy="-31" r="2.5" />
+        <circle cx="14" cy="-31" r="2.5" />
+        <circle r="22" fill="var(--robot-fill, none)" />
+      </g>
+      <g fill="var(--robot-eyes, currentColor)">
+        <circle cx="-7" cy="1" r="2.8" />
+        <circle cx="7" cy="1" r="2.8" />
+      </g>
+    </g>
+  </symbol>
+  <symbol id="bot-8" viewBox="-38 -37 76 64">
+    <g>
+      <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0-17v-8m-6-5 6 5 6-5" />
+        <path d="M-13-17h26q3 0 5 4l9 26q2 5-4 5h-46q-6 0-4-5l9-26q2-4 5-4Z" fill="var(--robot-fill, none)" />
+      </g>
+      <g fill="var(--robot-eyes, currentColor)">
+        <circle cx="-7" cy="2" r="2.8" />
+        <circle cx="7" cy="2" r="2.8" />
+      </g>
+    </g>
+  </symbol>
+  <symbol id="bot-9" viewBox="-38 -37 76 64">
+    <g>
+      <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0-17v-8m-5 0h10" />
+        <path d="M-12-17h24l16 14q3 3 0 6L12 17h-24L-28 3q-3-3 0-6Z" fill="var(--robot-fill, none)" />
+      </g>
+      <g fill="var(--robot-eyes, currentColor)">
+        <circle cx="-7" cy="0" r="2.8" />
+        <circle cx="7" cy="0" r="2.8" />
+      </g>
+    </g>
+  </symbol>
+  <symbol id="bot-10" viewBox="-38 -37 76 64">
+    <g>
+      <g fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0-15v-8m-4-4 4-4 4 4-4 4Z" />
+        <path d="M-24-15h48q5 0 4 6l-3 14q-2 7-9 11L4 23q-4 2-8 0l-12-7q-7-4-9-11l-3-14q-1-6 4-6Z" fill="var(--robot-fill, none)" />
+      </g>
+      <g fill="var(--robot-eyes, currentColor)">
+        <circle cx="-7" cy="1" r="2.8" />
+        <circle cx="7" cy="1" r="2.8" />
+      </g>
+    </g>
+  </symbol>
+</svg>

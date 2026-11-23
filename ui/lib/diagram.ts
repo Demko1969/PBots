@@ -15,6 +15,65 @@ export function solutionSteps(answer: string): string[] {
   return steps;
 }
 
+type AnswerStep = { title: string; detail: string };
+
+function planSteps(answer: string): AnswerStep[] {
+  const lines = answer.split(/\r?\n/);
+  const planHeading = /^(?:(?:\d+\s+)?(?:aylık|haftalık|günlük|saatlik)\s+)?(?:yol haritası|(?:uygulama|eylem|geçiş) (?:planı|aşamaları|adımları))(?=\s|[:：(]|$)|^ilk .{1,60} için saatlik geçiş planı/iu;
+  const timelineItem = /^((?:ay|hafta|gün)\s*\d+(?:\s*[–—-]\s*\d+)?)\s*[:：]\s*(.+)$/iu;
+  const itemPattern = /^\s*(?:[-•*]\s+|\d+[.)]\s+)(.+)$/u;
+  const steps: AnswerStep[] = [];
+  let inPlan = false;
+
+  for (const raw of lines) {
+    const line = raw.trim().replace(/^#{1,6}\s+/, "").replace(/\*\*/g, "");
+    if (!line) continue;
+
+    const item = itemPattern.exec(line);
+    const timeline = inPlan ? timelineItem.exec(item?.[1] ?? line) : null;
+    if (!timeline && (!item || planHeading.test(item[1]))) {
+      if (steps.length >= 2) break;
+      steps.length = 0;
+      inPlan = planHeading.test(item?.[1] ?? line);
+      continue;
+    }
+    if (!inPlan) continue;
+
+    if (timeline) {
+      const [, rawPeriod, action] = timeline;
+      const period = rawPeriod.replace(/(\D)(\d)/u, "$1 $2");
+      const [, title, detail] = /^(.+?)(?:\s+[–—]\s+|,\s+)(.+)$/.exec(action) ?? [action, action, ""];
+      steps.push(detail ? { title, detail: `${period} · ${detail}` } : { title, detail: period });
+      continue;
+    }
+
+    const text = item![1].trim();
+    const scheduled = /^((?:ay|hafta|gün|saat)\s+[^(:]+)\(([^)]+)\)\s*[:：]\s*(.*)$/iu.exec(text);
+    const named = /^([^:：]{1,72})[:：]\s*(.+)$/u.exec(text);
+    const milestones = [...(scheduled?.[3] ?? "").matchAll(
+      /(?:^|,\s*)((?:ay|hafta|gün)\s*\d+)\s*[:：]\s*(.+?)(?=,\s*(?:ay|hafta|gün)\s*\d+\s*[:：]|$)/giu,
+    )];
+    if (milestones.length > 1) {
+      steps.push(...milestones.map(([, period, action]) => ({
+        title: action.trim().replace(/[.]$/, ""),
+        detail: period.replace(/(\D)(\d)/u, "$1 $2"),
+      })));
+      if (steps.length >= 12) break;
+      continue;
+    }
+
+    const title = scheduled?.[2] ?? named?.[1] ?? text;
+    const detail = scheduled
+      ? `${scheduled[1].trim()} · ${scheduled[3]}`
+      : named?.[2] ?? "";
+    const words = detail.split(/\s+/);
+    steps.push({ title, detail: words.length > 36 ? words.slice(0, 36).join(" ") + "…" : detail });
+    if (steps.length === 12) break;
+  }
+
+  return steps.length >= 2 ? steps.slice(0, 12) : [];
+}
+
 type FlowNode = { id: string; title: string; detail: string; kind: string };
 type FlowEdge = { from: string; to: string; label: string };
 export type SolutionFlow = { nodes: FlowNode[]; edges: FlowEdge[] };
@@ -22,13 +81,50 @@ export type SolutionFlow = { nodes: FlowNode[]; edges: FlowEdge[] };
 export function solutionFlow(value: SolutionFlow | undefined, answer: string): SolutionFlow {
   if (Array.isArray(value?.nodes) && Array.isArray(value.edges)) {
     const nodes = value.nodes.filter(node => node && typeof node.id === "string" &&
-      typeof node.title === "string" && node.title.trim()).slice(0, 12);
+      typeof node.title === "string" && node.title.trim()).slice(0, 32);
     const ids = new Set(nodes.map(node => node.id));
-    const edges = value.edges.filter(edge => edge && ids.has(edge.from) && ids.has(edge.to)).slice(0, 20);
+    const edges = value.edges.filter(edge => edge && ids.has(edge.from) && ids.has(edge.to)).slice(0, 64);
     if (ids.size === nodes.length && nodes.length && (nodes.length === 1 || edges.length)) return { nodes, edges };
   }
-  const nodes = solutionSteps(answer).map((title, index) => ({ id: String(index), title, detail: "", kind: "step" }));
-  return { nodes, edges: nodes.slice(1).map((node, index) => ({ from: String(index), to: node.id, label: "" })) };
+  const explicit = solutionSteps(answer).slice(0, 12);
+  const steps = explicit.length ? explicit.map(title => ({ title, detail: "" })) : planSteps(answer);
+  const nodes = steps.map((step, index) => ({
+    ...step,
+    id: String(index),
+    kind: index === steps.length - 1 ? "end" : "step",
+  }));
+  const edges = nodes.slice(1).map((node, index) => ({ from: String(index), to: node.id, label: "" }));
+  const pilot = nodes.findIndex(node => /\bpilot\s*\(/iu.test(node.title));
+  const review = nodes.findIndex((node, index) => index > pilot && /pilot değerlendirme/iu.test(node.title));
+  const retry = /(?:pilot başarısız[^\n]*|eğitim[^\n]*)[^\n]*(?:düzeltme[^\n]*yeniden pilot|düzeltme[^\n]*yeniden dene)/iu.test(answer);
+  if (!explicit.length && retry && pilot >= 0 && review > pilot && review < nodes.length - 1) {
+    const decision = { id: "pilot-decision", title: "Pilot kabul edildi mi?", detail: "", kind: "decision" };
+    const correction = { id: "pilot-retry", title: "Eksikleri düzelt ve pilotu tekrarla", detail: "", kind: "step" };
+    const [next] = edges.splice(review, 1, { from: nodes[review].id, to: decision.id, label: "" });
+    nodes.splice(review + 1, 0, decision, correction);
+    edges.push(
+      { from: decision.id, to: next.to, label: "Kabul edildi" },
+      { from: decision.id, to: correction.id, label: "Kabul edilmedi" },
+      { from: correction.id, to: String(pilot), label: "Yeniden pilot" },
+    );
+  }
+  return { nodes, edges };
+}
+
+export function answerDiagram(question: string, answer: string, diagram?: SolutionFlow) {
+  const flow = solutionFlow(diagram, answer);
+  if (flow.nodes.length) return { flow, title: "Çözüm akışı" };
+
+  return {
+    title: "Soru ve yanıt",
+    flow: {
+      nodes: [
+        { id: "question", title: question, detail: "", kind: "step" },
+        { id: "answer", title: "Yanıt", detail: answer.replace(/\*\*/g, ""), kind: "end" },
+      ],
+      edges: [{ from: "question", to: "answer", label: "" }],
+    },
+  };
 }
 
 function xml(text: string): string {

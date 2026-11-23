@@ -5,7 +5,19 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('../lib/table.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
-const { parseCsv, profileTable, tableQuestion, supportMetrics } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const tableModule = outputText.replace('./credential-redaction', new URL('../lib/credential-redaction.ts', import.meta.url).href);
+const { parseCsv, profileTable, tableQuestion, supportMetrics, makeTablePreview, tablePreviewFromContext } = await import(`data:text/javascript;base64,${Buffer.from(tableModule).toString('base64')}`);
+
+test('redacts preview credentials before clipping cells', () => {
+  const syntheticKey = 'sk-proj-' + 'test'.repeat(8);
+  const preview = makeTablePreview({
+    name: syntheticKey + '.csv',
+    columns: ['notes'],
+    rows: [[' '.repeat(62) + syntheticKey]],
+  });
+  assert.equal(preview[0], '[gizlendi].csv');
+  assert.equal(preview[2][0][0], ' '.repeat(62) + '[gizlendi]');
+});
 
 test('parses BOM, quoted delimiters, escaped quotes and multiline cells', () => {
   const table = parseCsv('\uFEFFname,amount\r\n"a,b",1\r\n"c""d\ne",2\r\n', 'sample.csv', ',');
@@ -33,17 +45,20 @@ test('profiles every row while preserving ambiguous values as text', () => {
   assert.deepEqual(profile[1].statistics, { count: 2, sum: -0.5, mean: -0.25, min: -2, max: 1.5 });
 });
 
-test('context labels sampling and includes full-file totals and column notes', () => {
+test('context labels sampling and supports automatic column interpretation and full-file totals', () => {
   const table = parseCsv(`amount\n${Array.from({ length: 12 }, (_, i) => i + 1).join('\n')}`, 'sales.csv', ',');
-  const context = tableQuestion('Analyze revenue', table, 'EUR');
+  const context = tableQuestion('Analyze revenue', table);
   const evidence = JSON.parse(context.slice(context.indexOf('{')));
   assert.equal(evidence.rowCount, 12);
   assert.equal(evidence.sampleRows.length, 10);
   assert.equal(evidence.columns[0].statistics.sum, 78);
-  assert.equal(evidence.userColumnNotes, 'EUR');
+  assert.equal(evidence.columns[0].name, 'amount');
+  assert.equal(evidence.sampleSize, 10);
+  assert.match(context, /Interpret column meanings, units, identifiers and date formats from headers/);
+  assert.match(context, /If sampleSize equals rowCount, every data row is available/);
   assert.match(context, /untrusted source data/);
   assert.match(context, /cannot establish filtered totals/);
-  assert.throws(() => tableQuestion('Analyze', { name: 'big', columns: ['text'], rows: [['x'.repeat(25000)]] }, ''));
+  assert.throws(() => tableQuestion('Analyze', { name: 'big', columns: ['text'], rows: [['x'.repeat(25000)]] }));
 });
 
 
@@ -53,6 +68,14 @@ test('detects delimiters without a manual selector and ignores quoted header pun
   assert.deepEqual(parseCsv('name\tamount\na\t2', 'sample.csv').columns, ['name', 'amount']);
   assert.deepEqual(parseCsv('"name, label";amount\na;2', 'sample.csv').columns, ['name, label', 'amount']);
   assert.deepEqual(parseCsv('"name; label",amount\na,2', 'sample.csv').columns, ['name; label', 'amount']);
+});
+
+test('recovers a compact preview from the saved CSV evidence', () => {
+  const table = parseCsv('Kayıt,Tutar\nA,5\nB,\nC,1\nD,8', 'mutabakat.csv');
+  const preview = makeTablePreview(table);
+  assert.deepEqual(preview, ['mutabakat.csv', ['Kayıt', 'Tutar'], [['A', '5'], ['B', ''], ['C', '1']], 4]);
+  assert.deepEqual(tablePreviewFromContext(tableQuestion('Mutabakatı incele.', table)), preview);
+  assert.equal(tablePreviewFromContext('Tablosuz soru'), undefined);
 });
 
 
