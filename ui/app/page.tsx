@@ -8,9 +8,17 @@ import { conversationBefore, conversationPrompt } from "../lib/conversation";
 import { canReuseSavedResult, canShowStoredDiagram } from "../lib/judge-review";
 import { groupHistory, historyGroupKey, historyRoot } from "../lib/history-groups";
 import Image from "next/image";
+import { appRequest, brandLogo, robotSprite, isDemoTransport } from "../lib/app-request";
 import Setup, { type SetupStatus } from "../components/Setup";
 import { isTablePreview, makeTablePreview, MAX_CSV_BYTES, parseCsv, profileTable, tablePreviewFromContext, tableQuestion, type TablePreview } from "../lib/table";
 import { Fragment, type DragEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+
+export type DemoScenario = {
+  question: string;
+  followUp: string;
+  csv: { name: string; text: string };
+  download: string;
+};
 
 type Stage = "idle" | "planning" | "working" | "judging" | "complete" | "cancelled" | "error";
 type AgentStatus = "waiting" | "working" | "done" | "error";
@@ -78,7 +86,7 @@ type HistoryGroup = { key: string; question: string; completed: boolean };
 const historyKey = "ortak-akil.history.v1";
 
 async function historyRequest<T>(body: Record<string, unknown>): Promise<T> {
-  const response = await fetch("/api/history", {
+  const response = await appRequest("/api/history", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -92,6 +100,7 @@ async function historyRequest<T>(body: Record<string, unknown>): Promise<T> {
 let migration: Promise<void> | undefined;
 
 async function importBrowserHistory() {
+  if (isDemoTransport) return;
   let entries: SavedRun[];
   try { entries = JSON.parse(localStorage.getItem(historyKey) ?? "[]"); }
   catch { return; }
@@ -154,7 +163,7 @@ const modelOptions = [
 const previewNumber = new Intl.NumberFormat("tr-TR", { maximumSignificantDigits: 6 });
 
 async function postStage<T>(stage: string, payload: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`/api/n8n/${stage}`, {
+  const response = await appRequest(`/api/n8n/${stage}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -249,7 +258,7 @@ function PlanningCrew() {
 function AgentIcon({ agentId }: { agentId: number }) {
   const bot = ((agentId - 1) % 10 + 10) % 10 + 1;
   return <svg className="robot-icon expert-bot-icon" width="34" height="30" aria-hidden="true">
-    <use href={`/planning-bots.svg#bot-${bot}`} width="100%" height="100%" />
+    <use href={`${robotSprite}#bot-${bot}`} width="100%" height="100%" />
   </svg>;
 }
 
@@ -616,9 +625,9 @@ function StatusMark({ status }: { status: AgentStatus }) {
   return <span className={`status-mark status-${status}`} aria-label={{ waiting: "Bekliyor", working: "Çalışıyor", done: "Tamamlandı", error: "Hata" }[status]} role="img" />;
 }
 
-function useAttachment() {
+function useAttachment(sample?: DemoScenario["csv"]) {
   const [media, setMedia] = useState<{ file: File; mime: string; digest: string; preview?: string; thumbnail?: string } | null>(null);
-  const [csvSource, setCsvSource] = useState<{ name: string; text: string } | null>(null);
+  const [csvSource, setCsvSource] = useState<{ name: string; text: string } | null>(sample ?? null);
   const [readingCsv, setReadingCsv] = useState(false);
   const [csvError, setCsvError] = useState("");
   const csv = useMemo(() => {
@@ -636,7 +645,7 @@ function useAttachment() {
     const version = ++loadVersion.current;
     setReadingCsv(false);
     setMedia(null);
-    setCsvSource(null);
+    setCsvSource(file ? null : sample ?? null);
     setCsvError("");
     if (!file) return;
     const mime = attachmentType(file.name);
@@ -676,10 +685,11 @@ function useAttachment() {
     readingCsv, csvError, tableProfile, loadAttachment, media, setCsvError };
 }
 
-function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savingDocs, onSetup, onSave, onDiagram }: {
+function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savingDocs, onSetup, onSave, onDiagram, showDocs = true }: {
   run: SavedRun;
   documentUrl?: string;
   docsDisabled: boolean;
+  showDocs?: boolean;
   managedSetup: boolean;
   savingDocs: boolean;
   onSetup: () => void;
@@ -691,7 +701,7 @@ function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savin
   const flow = completed.diagram;
   return (
     <div className="result-exports" role="group" aria-label="Sonucu dışa aktar">
-      {docsDisabled ? (
+      {showDocs && (docsDisabled ? (
         <a className="result-export" href={managedSetup ? "#google-docs-setup" : "/docs/google-docs.txt"} aria-label="Google Docs kurulumu" onClick={event => {
           if (!managedSetup) return;
           event.preventDefault();
@@ -706,7 +716,7 @@ function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savin
           <ExportIcon kind="docs" />
           <span className="expert-tooltip" aria-hidden="true">Docs’a kaydet</span>
         </button>
-      )}
+      ))}
       {flow && canShowStoredDiagram(completed.showDiagram, flow) && <button className="result-export" type="button" aria-label="Çözüm akışını göster"
         aria-haspopup="dialog" onClick={() => onDiagram(flow)}><ExportIcon kind="diagram" /><span className="expert-tooltip" aria-hidden="true">Diyagramı göster</span></button>}
     </div>
@@ -714,14 +724,18 @@ function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savin
 }
 
 export default function Home() {
+  return <Workspace />;
+}
+
+export function Workspace({ demo }: { demo?: DemoScenario }) {
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const setupBlocked = !!setup?.enabled && (!setup.configured || !setup.connected || setup.installing);
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(demo?.question ?? "");
   const [questionError, setQuestionError] = useState("");
   const [followUpQuestion, setFollowUpQuestion] = useState("");
   const questionField = useRef<HTMLTextAreaElement>(null);
   const [showWorkspace, setShowWorkspace] = useState(false);
-  const questionAttachment = useAttachment();
+  const questionAttachment = useAttachment(demo?.csv);
   const followUpAttachment = useAttachment();
   const { csvSource, csv,
     readingCsv, csvError, tableProfile, loadAttachment, media, setCsvError } = showWorkspace ? followUpAttachment : questionAttachment;
@@ -1006,7 +1020,7 @@ export default function Home() {
 
   function openSaved(run: SavedRun, entries: SavedRun[], position: "bottom" | "preserve" = "bottom") {
     if (!run.result) return;
-    setFollowUpQuestion("");
+    setFollowUpQuestion(demo?.followUp ?? "");
     setSettingsOpen(false);
     setCsvOpen(false);
     const question = run.plan?.question ?? run.result.question ?? run.question;
@@ -1134,7 +1148,7 @@ export default function Home() {
           await checkpoint(run).catch(() => setHistoryError("Kısa yanıt geçmişe kaydedilemedi."));
         }
         openSaved(run, prior);
-        if (isNewQuestion) setQuestion("");
+        if (isNewQuestion) setQuestion(demo?.question ?? "");
         return;
       }
       setHistoryError("");
@@ -1153,7 +1167,7 @@ export default function Home() {
           }
           openSaved(saved, prior);
           if (isNewQuestion) {
-            setQuestion("");
+            setQuestion(demo?.question ?? "");
             void questionAttachment.loadAttachment(undefined);
           }
           void followUpAttachment.loadAttachment(undefined);
@@ -1203,7 +1217,7 @@ export default function Home() {
           await checkpoint(run);
           openSaved(run, prior, "preserve");
           if (isNewQuestion) {
-            setQuestion("");
+            setQuestion(demo?.question ?? "");
             void questionAttachment.loadAttachment(undefined);
           }
           void followUpAttachment.loadAttachment(undefined);
@@ -1262,7 +1276,7 @@ export default function Home() {
         await checkpoint(run);
         openSaved(run, prior, "preserve");
         if (isNewQuestion) {
-          setQuestion("");
+          setQuestion(demo?.question ?? "");
           void questionAttachment.loadAttachment(undefined);
         }
         void followUpAttachment.loadAttachment(undefined);
@@ -1333,7 +1347,7 @@ export default function Home() {
 
   function resultExports(run: SavedRun) {
     const documentUrl = googleDocumentUrl(docsLinks[run.id] ?? run.documentUrl);
-    return <EvaluationExports run={run} documentUrl={documentUrl}
+    return <EvaluationExports showDocs={!demo} run={run} documentUrl={documentUrl}
       docsDisabled={setup?.docsEnabled !== true && !documentUrl} managedSetup={setup?.enabled === true} savingDocs={savingDocs} onSetup={showDocsSetup}
       onSave={saveToDocs} onDiagram={showSolutionDiagram} />;
   }
@@ -1389,7 +1403,7 @@ export default function Home() {
     closeComposerPanels();
   }
 
-  const canAttach = !isBusy && (!showWorkspace || !!result);
+  const canAttach = !demo && !isBusy && (!showWorkspace || !!result);
 
   function attachFile(file: File | undefined) {
     if (!file || !canAttach) return;
@@ -1425,7 +1439,7 @@ export default function Home() {
         {readingCsv && <span role="status">Dosya okunuyor…</span>}
         {(csvError || csv.error) && <span role="alert">{csvError || csv.error}</span>}
       </div>
-      {!readingCsv && <button type="button" className="text-button attachment-remove" aria-label="Eki kaldır"
+      {!readingCsv && <button type="button" className="text-button attachment-remove" aria-label="Eki kaldır" disabled={!!demo}
         onClick={() => { void loadAttachment(undefined); setCsvOpen(false); }}>×</button>}
     </div>
   );
@@ -1508,7 +1522,7 @@ export default function Home() {
       </>}
 
     </div>
-    <Setup onStatus={setSetup} />
+    {!demo && <Setup onStatus={setSetup} />}
     {historyGroups.length > 0 && <HistoryDisclosure className="history-management" summary={<h2>Değerlendirme kayıtları</h2>}>
       {historyError && <p className="history-error" role="status">{historyError}</p>}
       {historyGroups.map(group => {
@@ -1564,7 +1578,7 @@ export default function Home() {
       )}
       <header className="topbar">
         <div className="brand">
-          <Image className="brand-logo" src="/ortak-akil-lens.svg" width={44} height={44} alt="" priority unoptimized />
+          <Image className="brand-logo" src={brandLogo} width={44} height={44} alt="" priority unoptimized />
           <span className="brand-name">Ortak Akıl</span>
         </div>
       </header>
@@ -1585,7 +1599,7 @@ export default function Home() {
                   void followUpAttachment.loadAttachment(undefined);
                   setSettingsOpen(false);
                   setCsvOpen(false);
-                  setQuestion("");
+                  setQuestion(demo?.question ?? "");
                   setQuestionError("");
                   showQuestion();
                 }}>
@@ -1623,7 +1637,11 @@ export default function Home() {
           </div>
         </aside>
       <div className="evaluation-main" id="top">
-      {!showWorkspace && (
+      {demo && <div className="demo-notice">
+        {showWorkspace ? "Örnek analiz · Hazır yanıtlar" : "Örnek analiz · Gönder düğmesiyle başlat"}
+        <a href={demo.download} download={demo.csv.name}>Örnek CSV’yi indir</a>
+      </div>}
+      {!showWorkspace && !demo && (
         <div className="question-examples" aria-label="Örnek ERP sorusu">
           {exampleQuestions.map((example, index) =>
             <p key={example} style={{ animationDelay: `${index * 6}s` }}
@@ -1637,6 +1655,7 @@ export default function Home() {
           {!showWorkspace && attachmentCard}
           <textarea
             id="question"
+            readOnly={!!demo}
             onPointerDown={closeComposerPanels}
             onFocus={closeComposerPanels}
             aria-label="Değerlendirilecek soru"
@@ -1659,7 +1678,7 @@ export default function Home() {
             disabled={isBusy}
           />
           <div className="composer-tools">
-            {composerTools}
+            {!demo && composerTools}
             <button className="primary-button symbol-send" type="submit" data-running={isBusy} aria-busy={isBusy} aria-label="Uzmanları çalıştır" title="Uzmanları çalıştır" disabled={(!question.trim() && !hasAttachment) || !openaiModel.trim() || isBusy || savingDocs || attachmentBlocked}>
               <SendSymbol />
             </button>
@@ -1732,7 +1751,7 @@ export default function Home() {
               if (activeRecord?.result && !isBusy) void runEvaluation(activeRecord);
             }}>
               {attachmentCard}
-              {!isBusy && <textarea rows={1} disabled={!result} aria-label="Takip sorusu" placeholder="Bu değerlendirme hakkında soru sor"
+              {!isBusy && <textarea rows={1} readOnly={!!demo} disabled={!result} aria-label="Takip sorusu" placeholder="Bu değerlendirme hakkında soru sor"
                 onPointerDown={closeComposerPanels} onFocus={closeComposerPanels}
                 value={followUpQuestion} onChange={event => setFollowUpQuestion(event.target.value)}
                 onKeyDown={event => {
@@ -1741,7 +1760,7 @@ export default function Home() {
                   if ((followUpQuestion.trim() || hasAttachment) && !savingDocs) event.currentTarget.form?.requestSubmit();
                 }} />}
               <div className="composer-tools">
-                {result && !isBusy && composerTools}
+                {!demo && result && !isBusy && composerTools}
                 <button type={isBusy ? "button" : "submit"} className="primary-button symbol-send"
                   data-running={isBusy} data-spinning={isBusy}
                   aria-label={isBusy ? "Değerlendirmeyi durdur" : "Takip sorusunu gönder"}
