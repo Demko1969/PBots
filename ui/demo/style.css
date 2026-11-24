@@ -1,7 +1,4 @@
 .demo-robot-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
-.demo-notice {
-  padding: .65rem 1rem;
-  color: var(--muted);
-  font-size: .875rem;
-}
-.demo-settings-note { margin: 0; color: var(--muted); font-size: .875rem; }
+.composer-tools .demo-attachment-toggle { border-radius: 8px; }
+#demo-setup-title ~ label { display: block; margin-bottom: .5rem; font-weight: 650; }
+#demo-setup-key { margin-bottom: .75rem; }

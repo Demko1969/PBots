@@ -1451,7 +1451,7 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
         onClick={() => { setModelPickerOpen(false); setCsvOpen(false); setSettingsOpen(open => !open); }}>
         <span className="settings-sliders" aria-hidden="true"><i /><i /><i /></span>
       </button>
-      <button type="button" className={`settings-toggle text-button${hasAttachment ? " csv-attached" : ""}`} title={attachmentName ?? "Dosya ekle"}
+      <button type="button" className={`settings-toggle text-button${demo ? " demo-attachment-toggle" : hasAttachment ? " csv-attached" : ""}`} title={attachmentName ?? "Dosya ekle"}
         aria-label="Dosya ekle"
         aria-expanded={csvOpen} aria-controls="csv-panel" onClick={() => { setModelPickerOpen(false); setSettingsOpen(false); setCsvOpen(open => !open); }}>
         <span aria-hidden="true">+</span>
@@ -1528,7 +1528,12 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
       </>}
 
     </div>
-    {demo && <p className="demo-settings-note">Model seçimi örnek analizde gösterilir. Bağlantı kurulumu tam sürümde yapılır.</p>}
+    {demo && <section className="setup-panel" aria-labelledby="demo-setup-title">
+      <h2 id="demo-setup-title">İlk kurulum</h2>
+      <label htmlFor="demo-setup-key">OpenAI API anahtarı</label>
+      <input id="demo-setup-key" type="password" placeholder="sk-…" disabled />
+      <button type="button" className="primary-button" disabled>Kurulumu tamamla</button>
+    </section>}
     {!demo && <Setup onStatus={setSetup} />}
     {historyGroups.length > 0 && <HistoryDisclosure className="history-management" summary={<h2>Değerlendirme kayıtları</h2>}>
       {historyError && <p className="history-error" role="status">{historyError}</p>}
@@ -1644,7 +1649,6 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
           </div>
         </aside>
       <div className="evaluation-main" id="top">
-      {demo && !showWorkspace && <div className="demo-notice">Örnek analiz · Gönder düğmesiyle başlat</div>}
       {!showWorkspace && !demo && (
         <div className="question-examples" aria-label="Örnek ERP sorusu">
           {exampleQuestions.map((example, index) =>
