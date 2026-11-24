@@ -1459,27 +1459,33 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
     </>
   );
 
+  const panelTable = demo ? questionAttachment.csv.table : csv.table;
+  const panelProfile = demo ? questionAttachment.tableProfile : tableProfile;
   const composerPanels = (
     <>
-    <div id="csv-panel" className="composer-panel csv-input" data-table={!!csv.table}
+    <div id="csv-panel" className="composer-panel csv-input" data-table={!!panelTable}
       data-open={csvOpen} inert={!csvOpen} role="group" aria-label="Dosya ekle">
-      <input id="csv-file" type="file" hidden accept={ATTACHMENT_ACCEPT} disabled={!canAttach || readingCsv}
-        onChange={event => { attachFile(event.target.files?.[0]); event.target.value = ""; }} />
-      <button type="button" className="text-button attachment-choose" disabled={!canAttach || readingCsv}
-        onClick={event => event.currentTarget.parentElement?.querySelector<HTMLInputElement>("#csv-file")?.click()}>
-        Dosya seç
-      </button>
-      {csv.table && <>
-        <p><b>{csv.table.name}</b> · {csv.table.rows.length} satır · {csv.table.columns.length} sütun</p>
+      {demo ? (
+        <a className="text-button attachment-choose" href={demo.download} download={demo.csv.name}>Örnek CSV’yi indir</a>
+      ) : <>
+        <input id="csv-file" type="file" hidden accept={ATTACHMENT_ACCEPT} disabled={!canAttach || readingCsv}
+          onChange={event => { attachFile(event.target.files?.[0]); event.target.value = ""; }} />
+        <button type="button" className="text-button attachment-choose" disabled={!canAttach || readingCsv}
+          onClick={event => event.currentTarget.parentElement?.querySelector<HTMLInputElement>("#csv-file")?.click()}>
+          Dosya seç
+        </button>
+      </>}
+      {panelTable && <>
+        <p><b>{panelTable.name}</b> · {panelTable.rows.length} satır · {panelTable.columns.length} sütun</p>
         <div className="table-preview" tabIndex={0} role="region" aria-label="CSV önizlemesi"><table>
           <caption>İlk 5 satırın önizlemesi</caption>
-          <thead><tr>{csv.table.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
-          <tbody>{csv.table.rows.slice(0, 5).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} title={cell}>{cell}</td>)}</tr>)}</tbody>
+          <thead><tr>{panelTable.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
+          <tbody>{panelTable.rows.slice(0, 5).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} title={cell}>{cell}</td>)}</tr>)}</tbody>
         </table></div>
         <div className="table-preview" tabIndex={0} role="region" aria-label="Sütun istatistikleri"><table>
           <caption>Tüm dosya üzerinden hesaplanan özet</caption>
           <thead><tr><th scope="col">Sütun</th><th scope="col">Tür</th><th scope="col">Eksik</th><th scope="col">Toplam</th><th scope="col">Ortalama</th><th scope="col">Min / Maks</th></tr></thead>
-          <tbody>{tableProfile.map(column => <tr key={column.name}>
+          <tbody>{panelProfile.map(column => <tr key={column.name}>
             <td>{column.name}</td><td>{column.type === "number" ? "Sayı" : "Metin"}</td><td>{column.missing}</td>
             <td>{column.statistics ? previewNumber.format(column.statistics.sum) : "—"}</td><td>{column.statistics ? previewNumber.format(column.statistics.mean) : "—"}</td>
             <td>{column.statistics ? `${previewNumber.format(column.statistics.min)} / ${previewNumber.format(column.statistics.max)}` : "—"}</td>
@@ -1522,6 +1528,7 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
       </>}
 
     </div>
+    {demo && <p className="demo-settings-note">Model seçimi örnek analizde gösterilir. Bağlantı kurulumu tam sürümde yapılır.</p>}
     {!demo && <Setup onStatus={setSetup} />}
     {historyGroups.length > 0 && <HistoryDisclosure className="history-management" summary={<h2>Değerlendirme kayıtları</h2>}>
       {historyError && <p className="history-error" role="status">{historyError}</p>}
@@ -1637,10 +1644,7 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
           </div>
         </aside>
       <div className="evaluation-main" id="top">
-      {demo && <div className="demo-notice">
-        {showWorkspace ? "Örnek analiz · Hazır yanıtlar" : "Örnek analiz · Gönder düğmesiyle başlat"}
-        <a href={demo.download} download={demo.csv.name}>Örnek CSV’yi indir</a>
-      </div>}
+      {demo && !showWorkspace && <div className="demo-notice">Örnek analiz · Gönder düğmesiyle başlat</div>}
       {!showWorkspace && !demo && (
         <div className="question-examples" aria-label="Örnek ERP sorusu">
           {exampleQuestions.map((example, index) =>
@@ -1678,7 +1682,7 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
             disabled={isBusy}
           />
           <div className="composer-tools">
-            {!demo && composerTools}
+            {composerTools}
             <button className="primary-button symbol-send" type="submit" data-running={isBusy} aria-busy={isBusy} aria-label="Uzmanları çalıştır" title="Uzmanları çalıştır" disabled={(!question.trim() && !hasAttachment) || !openaiModel.trim() || isBusy || savingDocs || attachmentBlocked}>
               <SendSymbol />
             </button>
@@ -1760,7 +1764,7 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
                   if ((followUpQuestion.trim() || hasAttachment) && !savingDocs) event.currentTarget.form?.requestSubmit();
                 }} />}
               <div className="composer-tools">
-                {!demo && result && !isBusy && composerTools}
+                {result && !isBusy && composerTools}
                 <button type={isBusy ? "button" : "submit"} className="primary-button symbol-send"
                   data-running={isBusy} data-spinning={isBusy}
                   aria-label={isBusy ? "Değerlendirmeyi durdur" : "Takip sorusunu gönder"}
