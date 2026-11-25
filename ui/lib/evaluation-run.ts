@@ -3,6 +3,7 @@ import { conversationPrompt } from "./conversation";
 import type { SolutionFlow } from "./diagram";
 import { publicExpert } from "./expert-answer";
 import { isIndependentExpert } from "./expert-independence";
+import type { Language } from "./language";
 import { historyRoot } from "./history-groups";
 import { canReuseSavedResult } from "./judge-review";
 import { makeTablePreview, tableQuestion, type DataTable, type TablePreview } from "./table";
@@ -29,6 +30,7 @@ type Plan = {
   agentCount: number;
   agents: Array<Omit<Agent, "status">>;
   directResponse?: string;
+  replyLanguage?: Language;
 };
 
 export type JudgeResult = {
@@ -78,6 +80,7 @@ type EvaluationInput = {
   table: DataTable | null;
   media: { file: File; digest: string; thumbnail?: string } | null;
   requestScope?: string;
+  fallbackLanguage?: Language;
   setupBlocked: boolean;
   signal: AbortSignal;
 };
@@ -148,7 +151,7 @@ export function isDiscussionExpert(agent: Pick<Agent, "role" | "task">) {
 }
 
 export async function runEvaluation(
-  { question, model, followUp, previousTurns, csvSource, table, media, requestScope, setupBlocked, signal }: EvaluationInput,
+  { question, model, followUp, previousTurns, csvSource, table, media, requestScope, fallbackLanguage, setupBlocked, signal }: EvaluationInput,
   { postStage, historyRequest, readHistory, saveRun, onProgress, onHistoryError }: EvaluationDependencies,
 ): Promise<EvaluationOutcome> {
   signal.throwIfAborted();
@@ -196,6 +199,7 @@ export async function runEvaluation(
           signal.throwIfAborted();
           const response = await postStage<Agent>("worker", {
             question: plan.question,
+            ...(plan.replyLanguage ? { replyLanguage: plan.replyLanguage } : {}),
             openaiModel: plan.openaiModel ?? plan.model,
             questionType: plan.questionType,
             complexity: plan.complexity,
@@ -298,6 +302,7 @@ export async function runEvaluation(
         isDiscussionExpert(agent) && isIndependentExpert(agent)) ? previousPlan : undefined;
     const plan = savedPlan ?? await postStage<Plan>("plan", {
       question: run.followUpPrompt ?? (question + attachmentEvidence),
+      ...(fallbackLanguage ? { languageQuestion: question, fallbackLanguage } : {}),
       openaiModel: model,
     }, signal);
     signal.throwIfAborted();
@@ -336,6 +341,7 @@ export async function runEvaluation(
     signal.throwIfAborted();
     const judgeResponse = await postStage<JudgeResult>("judge", {
       question: plan.question,
+      ...(plan.replyLanguage ? { replyLanguage: plan.replyLanguage } : {}),
       openaiModel: plan.openaiModel ?? plan.model,
       questionType: plan.questionType,
       complexity: plan.complexity,
