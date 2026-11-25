@@ -1,16 +1,16 @@
-OpenAI bağlantısı
+Connect to OpenAI
 
-Docker kurulumunda önce yerel n8n sahibi hesabını oluşturun. Ardından
-uygulamanın kurulum ekranına OpenAI API anahtarınızı girin. Kurulum anahtarı
-n8n credential deposuna aktarır ve ayrıca yerel webhook erişim anahtarı üretir.
+With Docker, create your local n8n owner account first. Return to Ortak Akıl,
+open Settings, and enter your OpenAI API key. Setup saves the key in n8n's
+credential store and generates a separate token for local webhook access.
 
-Elle kurulumda OpenAI anahtarını n8n'de Authorization başlıklı bir Header Auth
-credential olarak kaydedin. Planner, Worker ve Judge içindeki dört OpenAI
-isteğinde bu credential'ı seçin. Dört UI webhook'u ayrı bir
-X-Multi-Agent-Key Header Auth credential gerektirir. Eşleşen webhook anahtarı
-UI sunucusunun özel ui/.env.local dosyasına girilir.
+For manual setup, save the OpenAI key in an n8n Header Auth credential named
+Authorization. Select it on the four OpenAI request nodes in Planner, Worker
+and Judge. The four UI webhooks use a separate Header Auth credential named
+X-Multi-Agent-Key. Set the matching token in the UI server's private
+ui/.env.local file.
 
-Soru, CSV örnekleri ve analiz bağlamı OpenAI ile paylaşılır. JPG, PNG ve PDF
-eklerinin tamamı inceleme için gönderilir. Gerçek değerlendirmeler OpenAI API
-kullanımı oluşturur. Tam adımlar için proje içindeki deployment/README.md
-ve veri saklama bilgileri için SECURITY.md dosyasına bakın.
+Questions, CSV samples, and analysis context are shared with OpenAI. Entire
+JPG, PNG, and PDF attachments are sent for analysis. Evaluations use the OpenAI
+API. See deployment/README.md for the complete steps and SECURITY.md for
+details on data retention.

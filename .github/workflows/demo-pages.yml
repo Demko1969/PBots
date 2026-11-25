@@ -24,11 +24,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/ortak-akil-pages"
           cp output/web-demo/index.html "$RUNNER_TEMP/ortak-akil-pages/"
           cp -R output/web-demo/assets "$RUNNER_TEMP/ortak-akil-pages/"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Ortak-Akil-Demo
-          path: output/web-demo/Ortak-Akil-Demo.html
-          if-no-files-found: error
       - uses: actions/configure-pages@v5
         if: github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch
       - uses: actions/upload-pages-artifact@v4
