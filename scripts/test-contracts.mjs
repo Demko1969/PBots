@@ -188,3 +188,48 @@ assert.ok(report.indexOf(judgeOutput.finalAnswer) < report.indexOf(judgeOutput.a
 for (const answer of judgeOutput.answers) assert.ok(report.includes(answer.role) && report.includes(answer.task) && report.includes(answer.answer));
 
 console.log('Contract tests passed: original-question and OpenAI-model preservation, 1-10 Planner cap, forbidden-role filtering, deduplication, per-agent split, full aggregation, Judge output, and report ordering.');
+
+// The n8n wrappers must retain the selected language between OpenAI calls.
+function evaluateCode(workflow, name, json) {
+  const node = workflow.nodes.find(node => node.name === name);
+  return new Function('$input', node.parameters.jsCode)({ first: () => ({ json }) })[0].json;
+}
+function webhookWorkflow(name) {
+  return JSON.parse(readFileSync(new URL('../workflows/multi-agent-ui-' + name + '.json', import.meta.url), 'utf8'));
+}
+
+const languageQuestion = 'Comment gérer ces demandes ? Please answer in English.';
+const localizedBody = { question: csvQuestion, languageQuestion, fallbackLanguage: 'fr' };
+const plannerUIInput = evaluateCode(uiPlanner, 'Prepare UI Plan Input', { body: localizedBody });
+const plannerInput = evaluateCode(plannerWorkflow, 'Validate Planner Input', plannerUIInput);
+const localizedRequest = planModelInput(plannerInput);
+assert.equal(plannerInput.languageQuestion, languageQuestion);
+assert.equal(plannerInput.fallbackLanguage, 'fr');
+assert.ok(localizedRequest.input.includes(JSON.stringify(languageQuestion)));
+assert.match(localizedRequest.instructions, /interface fallback \(fr\)/);
+assert.deepEqual(localizedRequest.text.format.schema.properties.reply_language.enum, ['en', 'fr', 'tr']);
+
+const simulatedPlan = {
+  reply_language: 'en',
+  question_type: 'Support analysis',
+  complexity: 'low',
+  agents: [{ role: 'Support Analyst', task: 'Identify the slowest response.' }],
+};
+const localizedPlan = runPlannerNode(
+  { first: () => ({ json: { output: [{ content: [{ type: 'output_text', text: JSON.stringify(simulatedPlan) }] }] } }) },
+  () => ({ first: () => ({ json: plannerInput }) }),
+)[0].json;
+const { agents: localizedAgents, ...localizedStage } = evaluateCode(uiPlanner, 'Format UI Plan Response', localizedPlan);
+assert.equal(localizedStage.replyLanguage, 'en');
+
+const workerBody = { ...localizedStage, ...localizedAgents[0] };
+const workerUIInput = evaluateCode(webhookWorkflow('worker'), 'Prepare UI Worker Input', { body: workerBody });
+const localizedWorker = evaluateCode(workerWorkflow, 'Validate Worker Input', workerUIInput);
+assert.match(makeWorkerRequest(localizedWorker).instructions, /Yanıt dili: English/);
+
+const judgeBody = { ...localizedStage, answers: [{ ...localizedAgents[0], answer: 'Finance waited the longest.' }] };
+const judgeUIInput = evaluateCode(webhookWorkflow('judge'), 'Prepare UI Judge Input', { body: judgeBody });
+const localizedJudge = evaluateCode(judgeWorkflow, 'Validate and Format Judge Input', judgeUIInput);
+const judgeRequest = judgeWorkflow.nodes.find(node => node.name === 'Call Final Judge Synthesis').parameters.jsonBody;
+const makeJudgeRequest = new Function('$json', `return (${judgeRequest.slice(3, -2)});`);
+assert.match(makeJudgeRequest({ ...localizedJudge, comparisonNotes: [] }).instructions, /diagram text .*: English/);

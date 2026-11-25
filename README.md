@@ -6,7 +6,7 @@ Use the **English · Français · Türkçe** selector, then submit the prepared 
 
 Send the three prepared follow-up questions to choose a first-week metric, inspect the localized screenshot of an overdue Finance ticket, and propose an alert. The **+** menu shows the sample attachment, and the CSV is available to download. The demo runs entirely in the browser with prepared answers. It needs no installation, API key, typing, or uploads.
 
-The local app accepts your own questions, CSVs, images, and PDFs. A Planner assigns independent tasks, the Workers run in parallel, and a Judge combines their findings using the OpenAI Responses API. The web app uses a supported browser language on first use and remembers your selection.
+The local app accepts your own questions, CSVs, images, and PDFs. A Planner assigns independent tasks, the Workers run in parallel, and a Judge combines their findings using the OpenAI Responses API. The web app uses a supported browser language on first use and remembers your selection. The AI uses the language of the current question unless you request another supported reply language. If the question’s language is unclear, it uses the interface language. The solution diagram follows the reply language. Saved evaluations retain their original language.
 
 ## Local installation with Docker
 

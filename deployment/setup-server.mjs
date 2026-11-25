@@ -14,7 +14,7 @@ catch (error) { if (error.code !== 'EEXIST') throw error; }
 const internalToken = (await readFile(tokenFile, 'utf8')).trim();
 if (!/^[a-f0-9]{64}$/.test(internalToken)) throw new Error('Internal access token is invalid. Restore the access-token volume from backup.');
 const webhookCredential = { id: WEBHOOK_CREDENTIAL_ID, name: 'Ortak Akıl internal access', type: 'httpHeaderAuth', data: { name: 'X-Multi-Agent-Key', value: internalToken } };
-const assessmentVersion = 16;
+const assessmentVersion = 17;
 const authVersion = 2;
 let configured = await access(marker).then(() => true, () => false);
 let installing = false;

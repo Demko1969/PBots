@@ -28,11 +28,14 @@ function questionText(question: string) {
 }
 
 function readPreference(text: string): DiagramPreference {
+  const international = text.replaceAll("ı", "i");
   const label = "(?:diyagram(?:ı|ını)?|(?:(?:çözüm|işlem|süreç|karar)\\s+)?akış(?:ı|ını)?|akış şeması(?:nı)?)";
   if (new RegExp(`${label}\\s+(?:(?:da|de|lütfen)\\s+)?(?:istemiyorum|istemem|gerekmez|gerek yok|olmasın|çizme|ekleme|gösterme|oluşturma|hazırlama|verme|kullanma|olmadan)(?!\\p{L})`, "u").test(text) ||
-      /\b(?:no|without) (?:a )?(?:diagram|flowchart)\b/u.test(text)) return "declined";
+      /\b(?:no|without) (?:a )?(?:diagram|flowchart)\b/u.test(international) ||
+      /\b(?:sans|pas de|aucun) (?:diagramme|schéma|organigramme)\b/u.test(international)) return "declined";
   if (new RegExp(`${label}\\s+(?:(?:da|de|lütfen|olarak|şeklinde)\\s+)?(?:göster|çiz|ekle|oluştur|ver|hazırla|olsun|istiyorum|gerekli)`, "u").test(text) ||
-      /\b(?:show|draw|include|create) (?:a |the )?(?:diagram|flowchart)\b/u.test(text)) return "requested";
+      /\b(?:show|draw|include|create) (?:a |the )?(?:(?:solution|process) )?(?:diagram|flowchart)\b/u.test(international) ||
+      /\b(?:affich(?:e|ez|er)|montr(?:e|ez|er)|dessin(?:e|ez|er)|ajout(?:e|ez|er)|inclu(?:s|ez|re)|cré(?:e|ez|er))(?:-moi)?\s+(?:(?:un|le|ce) )?(?:diagramme|schéma|organigramme)\b/u.test(international)) return "requested";
   return "automatic";
 }
 
