@@ -1226,3 +1226,21 @@ button.history-question[aria-current="true"] { cursor: default; }
 .attachment-description [role="alert"] { color: #991b1b; }
 .attachment-remove { flex: none; border-radius: 50%; min-width: 1.8rem; min-height: 1.8rem; font-size: 1.2rem; }
 .attachment-choose { justify-self: start; padding: 0.35rem 0.65rem; border: 1px solid var(--line); border-radius: 0.5rem; }
+
+.desktop-dataset-picker {
+  display: grid;
+  gap: .35rem;
+  margin-top: .65rem;
+}
+
+.desktop-dataset-picker select {
+  width: 100%;
+  color: inherit;
+  padding: .45rem;
+  border: 1px solid currentColor;
+  border-radius: .45rem;
+}
+
+.desktop-disclosure {
+  margin: .65rem 0;
+}

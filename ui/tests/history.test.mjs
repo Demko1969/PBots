@@ -3,11 +3,84 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as nodeModule from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { canReuseSavedResult } from "../lib/judge-review.ts";
 import test from "node:test";
 
-test("sorts main questions and follow-ups by ask time and deletes only the selected group", async () => {
+const demoHistoryUrl = new URL("../demo/history.ts", import.meta.url).href;
+function resolve(specifier, context, next) {
+  if (context.parentURL === demoHistoryUrl && specifier === "../lib/history-groups") {
+    return next(specifier + ".ts", context);
+  }
+  return next(specifier, context);
+}
+const hooks = nodeModule.registerHooks?.({ resolve });
+if (!hooks) {
+  nodeModule.register("data:text/javascript," + encodeURIComponent(
+    `const demoHistoryUrl = ${JSON.stringify(demoHistoryUrl)}; export ${resolve.toString()}`,
+  ));
+}
+const { demoHistory } = await import(demoHistoryUrl);
+hooks?.deregister();
+
+async function checkHistoryThreads(history) {
+  const root = {
+    id: randomUUID(), requestKey: "a".repeat(64), rootDatasetId: "1".repeat(64),
+    question: "Ortak soru?", model: "test", answers: [], updated: 10,
+    result: { question: "Ortak soru?", finalAnswer: "Yanıt" },
+  };
+  const otherRoot = { ...root, id: randomUUID(), rootDatasetId: "2".repeat(64), createdAt: 30, updated: 30 };
+  const pending = { ...root, id: randomUUID(), createdAt: 20, updated: 20, result: undefined };
+  const legacyFollowUp = {
+    ...root, id: randomUUID(), question: "İlk takip", updated: 40,
+    followUpPrompt: "<onceki_degerlendirme>\nOrtak soru?\n\nÖnceki yanıt:\nYanıt",
+  };
+  const followUp = {
+    ...legacyFollowUp, id: randomUUID(), question: "İkinci takip", createdAt: 40,
+    rootQuestion: root.question, parentRunId: legacyFollowUp.id,
+  };
+  const otherFollowUp = { ...followUp, id: randomUUID(), rootDatasetId: otherRoot.rootDatasetId, createdAt: 50 };
+  for (const run of [root, pending, otherRoot, legacyFollowUp, followUp, otherFollowUp]) {
+    await history({ action: "import", run });
+  }
+
+  const key = JSON.stringify([root.rootDatasetId, "ortak soru"]);
+  const otherKey = JSON.stringify([otherRoot.rootDatasetId, "ortak soru"]);
+  const list = async () => (await history({ action: "list" })).groups.filter(group => [key, otherKey].includes(group.key));
+  const read = async (key) => (await history({ action: "group", key })).runs;
+  const ids = async (key) => (await read(key)).map(run => run.id);
+  const expected = [root.id, pending.id, legacyFollowUp.id, followUp.id];
+  assert.deepEqual(await list(), [
+    { key: otherKey, question: root.question, completed: true },
+    { key, question: root.question, completed: true },
+  ]);
+  assert.deepEqual(await ids(key), expected);
+  assert.equal((await read(key))[0].createdAt, undefined);
+
+  for (const run of [root, pending, legacyFollowUp]) await history({ action: "save", run: { ...run, updated: 100 } });
+  await history({ action: "import", run: { ...root, updated: 101 } });
+  assert.deepEqual(await ids(key), expected);
+  assert.equal((await read(key))[0].updated, 100);
+  assert.deepEqual((await list()).map(group => group.key), [otherKey, key]);
+
+  assert.deepEqual((await history({ action: "delete", id: legacyFollowUp.id })).deletedIds, [legacyFollowUp.id]);
+  assert.deepEqual(await ids(key), [root.id, pending.id, followUp.id]);
+  assert.deepEqual((await history({ action: "delete", id: pending.id })).deletedIds, [pending.id]);
+  assert.deepEqual(await ids(key), [root.id, followUp.id]);
+  assert.deepEqual(new Set((await history({ action: "delete", id: root.id })).deletedIds), new Set([root.id, followUp.id]));
+  assert.deepEqual(await ids(key), []);
+  assert.deepEqual((await history({ action: "deleteGroup", key, id: otherRoot.id })).deletedIds, []);
+  assert.deepEqual(await ids(otherKey), [otherRoot.id, otherFollowUp.id]);
+  assert.deepEqual(new Set((await history({ action: "deleteGroup", key: otherKey })).deletedIds), new Set([otherRoot.id, otherFollowUp.id]));
+  assert.deepEqual(await list(), []);
+}
+
+test("demo history follows the shared thread contract", async () => {
+  await checkHistoryThreads(body => demoHistory(structuredClone(body)));
+});
+
+test("SQLite history follows the shared thread contract and preserves leases and redaction", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ortak-akil-history-"));
   process.env.HISTORY_DB_PATH = join(directory, "history.sqlite");
   try {
@@ -62,6 +135,8 @@ test("sorts main questions and follow-ups by ask time and deletes only the selec
     assert.deepEqual((await history({ action: "list" })).groups, [groups[0]]);
     assert.deepEqual((await history({ action: "deleteGroup", key: groups[1].key, id: otherRoot.id })).deletedIds, []);
     assert.equal((await history({ action: "find", requestKey: otherRoot.requestKey })).run.id, otherRoot.id);
+
+    await checkHistoryThreads(history);
 
     const token = randomUUID();
     const contender = randomUUID();
