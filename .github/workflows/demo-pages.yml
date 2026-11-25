@@ -1,0 +1,53 @@
+name: Ortak Akıl web demo
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - run: npm install --global pnpm@11.20.0
+      - run: pnpm --dir ui install --frozen-lockfile
+      - run: pnpm --dir ui exec tsc --noEmit
+      - run: npm --prefix ui test
+      - run: npm run demo:build
+      - name: Stage the Pages site
+        run: |
+          mkdir -p "$RUNNER_TEMP/ortak-akil-pages"
+          cp output/web-demo/index.html "$RUNNER_TEMP/ortak-akil-pages/"
+          cp -R output/web-demo/assets "$RUNNER_TEMP/ortak-akil-pages/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ortak-Akil-Demo
+          path: output/web-demo/Ortak-Akil-Demo.html
+          if-no-files-found: error
+      - uses: actions/configure-pages@v5
+        if: github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch
+        with:
+          path: ${{ runner.temp }}/ortak-akil-pages
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    needs: build
+    concurrency:
+      group: ortak-akil-demo-pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

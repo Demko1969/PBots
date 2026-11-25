@@ -26,12 +26,15 @@ export function conversationBefore<T extends ConversationRun>(runs: T[], current
     turn = parent;
   }
 
-  // Older records have no parent ID. Infer their order within the existing history group.
-  if (turn.followUpPrompt && !turn.parentRunId) {
-    const earlier = eligible.filter(run => byId.has(run.id) && runTime(run) <= runTime(turn))
+  // Older records and deleted parents leave gaps. Infer earlier turns in this history group.
+  if (turn.followUpPrompt && (!turn.parentRunId || !runs.some(run => run.id === turn.parentRunId))) {
+    const index = runs.findIndex(run => run.id === turn.id);
+    const time = runTime(turn);
+    const earlier = runs.filter((run, position) => byId.has(run.id) &&
+      (runTime(run) < time || (runTime(run) === time && (index === -1 || position < index))))
       .sort((a, b) => runTime(a) - runTime(b));
-    const root = earlier.filter(run => !run.followUpPrompt).at(-1);
-    return [...(root ? [root] : []), ...earlier.filter(run => run.followUpPrompt), ...chain.reverse()];
+    const root = earlier.findLastIndex(run => !run.followUpPrompt);
+    return [...earlier.slice(Math.max(0, root)), ...chain.reverse()];
   }
   return chain.reverse();
 }
