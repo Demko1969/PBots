@@ -1,0 +1,19 @@
+Connexion à OpenAI
+
+Avec Docker, créez d’abord le compte administrateur de votre instance n8n
+locale. Revenez dans Ortak Akıl, ouvrez les paramètres et saisissez votre clé
+API OpenAI. La configuration enregistre la clé dans le coffre d’identifiants
+de n8n et génère un jeton distinct pour l’accès local aux webhooks.
+
+Pour une installation manuelle, enregistrez la clé dans un identifiant Header
+Auth de n8n avec l’en-tête Authorization. Sélectionnez cet identifiant dans
+les quatre nœuds de requête OpenAI des workflows Planner, Worker et Judge.
+Les quatre webhooks de l’interface utilisent un identifiant Header Auth
+distinct avec l’en-tête X-Multi-Agent-Key. Saisissez le jeton correspondant
+dans le fichier privé ui/.env.local du serveur de l’interface.
+
+Les questions, les extraits de CSV et le contexte d’analyse sont transmis à
+OpenAI. Les pièces jointes JPG, PNG et PDF sont transmises dans leur
+intégralité. Chaque évaluation utilise l’API OpenAI. Consultez le fichier
+deployment/README.md pour les étapes complètes et SECURITY.md pour la
+conservation des données.

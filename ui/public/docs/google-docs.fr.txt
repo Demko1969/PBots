@@ -1,0 +1,15 @@
+Export facultatif vers Google Docs
+
+1. Activez les API Google Drive et Google Docs dans Google Cloud. Configurez
+   les identifiants Google Drive OAuth2 et Google Docs OAuth2 dans n8n.
+2. Sélectionnez ces identifiants dans le workflow Multi-Agent UI - Google
+   Docs API. Remplacez REPLACE_WITH_GOOGLE_DRIVE_FOLDER_ID par l’identifiant
+   du dossier de destination.
+3. Sélectionnez l’identifiant Header Auth X-Multi-Agent-Key sur le webhook,
+   vérifiez les paramètres de partage du dossier, puis publiez le workflow.
+4. Avec Docker, exécutez GOOGLE_DOCS_ENABLED=true bash scripts/start.sh.
+   Pour une installation manuelle, définissez GOOGLE_DOCS_ENABLED=true dans
+   ui/.env.local et redémarrez le serveur de l’interface.
+
+L’export transmet à Google la question et le rapport de décision. Les pièces
+jointes brutes et les réponses individuelles des experts restent hors du rapport.

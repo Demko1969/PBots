@@ -11,13 +11,26 @@ import Image from "next/image";
 import { appRequest, brandLogo, robotSprite, isDemoTransport } from "../lib/app-request";
 import Setup, { type SetupStatus } from "../components/Setup";
 import { isTablePreview, MAX_CSV_BYTES, parseCsv, profileTable, tablePreviewFromContext, type TablePreview } from "../lib/table";
+import { type Language } from "../lib/language";
+import { LanguageSelect, setupGuide, useMessages, WorkspaceLanguage } from "../lib/workspace-language";
 import { Fragment, type DragEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 export type DemoScenario = {
   question: string;
-  followUp: string;
-  csv: { name: string; text: string };
+  followUps: { question: string; attachment?: File }[];
+  presentation: (language: Language) => {
+    question: (question: string) => string;
+    agent: (question: string, agent: Agent) => Agent;
+    result: (question: string, result: JudgeResult) => JudgeResult;
+    diagram: (question: string, flow: SolutionFlow) => SolutionFlow;
+    imageUrl: (question: string) => string | undefined;
+    tableLabel: (value: string) => string;
+  };
   download: string;
+  model: { id: string; label: string };
+  expertCount: (question: string) => number;
+  installationUrl: string;
+  csv: { name: string; text: string };
 };
 
 type Stage = "idle" | "planning" | "working" | "judging" | "complete" | "cancelled" | "error";
@@ -72,7 +85,6 @@ const modelOptions = [
   { id: "gpt-6.1-terra", label: "GPT-6.1 Terra · Hızlı" },
   { id: "gpt-6-luna", label: "GPT-6 Luna · Ekonomik" },
 ];
-const previewNumber = new Intl.NumberFormat("tr-TR", { maximumSignificantDigits: 6 });
 
 async function postStage<T>(stage: string, payload: unknown, signal?: AbortSignal): Promise<T> {
   const id = location.protocol === "ortak:" && signal ? crypto.randomUUID() : undefined;
@@ -120,7 +132,32 @@ const exampleQuestions = [
   "ERP’de siparişten tahsilata kadar hangi kontrolleri otomatikleştirebiliriz?",
 ];
 
-function SendSymbol() {
+const demoSendBlades = {
+  top: "M16 73 54 9C62-1 80 1 86 17L43 72Q29 71 16 73Z",
+  right: "M91 27 124 83C134 99 122 113 107 113H100Q103 102 94 86L75 49Z",
+  bottom: "M19 81C35 81 64 90 81 91Q90 98 89 108Q88 114 83 114H19C-3 114-3 81 19 81Z",
+};
+
+function SendSymbol({ demo }: { demo: boolean }) {
+  if (demo) return (
+    <span className="send-symbol demo-send-symbol" aria-hidden="true">
+      <svg viewBox="0 0 131 117" strokeWidth="5.6" strokeLinejoin="round">
+        <g className="demo-send-rotor">
+          {Object.entries(demoSendBlades).map(([blade, path]) => (
+            <g key={blade} className={`demo-send-blade send-symbol-blade-${blade}`}>
+              <path className="demo-send-fill" d={path} />
+              <path className="demo-send-outline" d={path} />
+            </g>
+          ))}
+        </g>
+        <g className="demo-send-center">
+          <circle className="demo-send-fill" cx="65.5" cy="70.2" r="10" />
+          <circle className="demo-send-outline" cx="65.5" cy="70.2" r="10" />
+        </g>
+      </svg>
+    </span>
+  );
+
   return (
     <span className="send-symbol" aria-hidden="true">
       <span className="send-symbol-blade send-symbol-blade-top" />
@@ -131,8 +168,15 @@ function SendSymbol() {
   );
 }
 
-function PlanningCrew() {
-  const [bots, setBots] = useState([1, 2, 3]);
+function DownloadIcon() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
+    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4" />
+  </svg>;
+}
+
+function PlanningCrew({ fixedCount }: { fixedCount?: number }) {
+  const [bots, setBots] = useState(() => Array.from({ length: fixedCount ?? 3 }, (_, index) => index + 1));
 
   function shuffleBots() {
     setBots(previous => {
@@ -148,7 +192,7 @@ function PlanningCrew() {
 
   return (
     <div className="planning-crew" aria-hidden="true" onAnimationIteration={event => {
-      if (event.target === event.currentTarget) shuffleBots();
+      if (fixedCount === undefined && event.target === event.currentTarget) shuffleBots();
     }}>
       {bots.map((bot, slot) => <span key={slot} className="planning-slot"><AgentIcon agentId={bot} /></span>)}
     </div>
@@ -171,9 +215,10 @@ function ExpertRoleTooltip({ role }: Pick<Agent, "role">) {
 }
 
 function ResultText({ result }: { result: JudgeResult }) {
+  const { t } = useMessages();
   return <>
     <RichText text={result.displayAnswer || result.finalAnswer} hideDecisionHeading />
-    {result.diagramIssue && <p className="evaluation-notice" role="status">{result.diagramIssue}</p>}
+    {result.diagramIssue && <p className="evaluation-notice" role="status">{t(result.diagramIssue)}</p>}
   </>;
 }
 
@@ -200,17 +245,18 @@ function FinalResultIcon({ confirmed, animate }: { confirmed: boolean; animate: 
 }
 
 function FinalResultButton({ selected, onClick }: { selected: boolean; onClick: () => void }) {
+  const { t } = useMessages();
   const [activation, setActivation] = useState(0);
 
   return (
-    <button type="button" className="text-button discussion-center" aria-label="Uzmanların kararı"
+    <button type="button" className="text-button discussion-center" aria-label={t("Uzmanların kararı")}
       aria-pressed={selected} aria-disabled={selected} onClick={() => {
         if (selected) return;
         setActivation(value => value + 1);
         onClick();
       }}>
       <FinalResultIcon key={activation} confirmed={selected} animate={selected && activation > 0} />
-      <span className="expert-tooltip" aria-hidden="true">Uzmanların kararı</span>
+      <span className="expert-tooltip" aria-hidden="true">{t("Uzmanların kararı")}</span>
     </button>
   );
 }
@@ -315,22 +361,51 @@ function savedTablePreview(run: SavedRun) {
   return tablePreviewFromContext(run.followUpPrompt ?? run.plan?.question ?? run.result?.question);
 }
 
-function ThreadQuestion({ question, thumbnail, table }: {
-  question: string; thumbnail?: string; table?: TablePreview;
+function ThreadQuestion({ question, thumbnail, table, imageUrl, tableLabel }: {
+  question: string; thumbnail?: string; table?: TablePreview; imageUrl?: string; tableLabel?: (value: string) => string;
 }) {
+  const { language, t } = useMessages();
+  const number = new Intl.NumberFormat(language);
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  function dismissImage() {
+    const preview = dialog.current;
+    if (!preview?.open) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) preview.close();
+    else preview.dataset.closing = "true";
+  }
+
+  const imageSource = imageUrl ?? (isAttachmentThumbnail(thumbnail) ? thumbnail : undefined);
+  // eslint-disable-next-line @next/next/no-img-element
+  const image = imageSource && <img className="thread-question-image" src={imageSource} alt={t("Soruya eklenen görsel")} />;
   return <>
-    {isAttachmentThumbnail(thumbnail) && (
-      // Use intrinsic dimensions for the locally generated preview.
-      // eslint-disable-next-line @next/next/no-img-element
-      <img className="thread-question-image" src={thumbnail} alt="Soruya eklenen görsel" />
-    )}
+    {image && imageUrl ? <>
+      <button className="demo-image-trigger" type="button" aria-label={t("Görseli büyüt")}
+        onClick={() => dialog.current?.showModal()}>{image}</button>
+      <dialog ref={dialog} className="diagram-dialog demo-image-dialog" aria-label={t("Finans talebinin ekran görüntüsü")}
+        onCancel={event => { event.preventDefault(); dismissImage(); }}
+        onClick={event => {
+          if (event.target !== event.currentTarget) return;
+          const { left, right, top, bottom } = event.currentTarget.getBoundingClientRect();
+          if (event.clientX < left || event.clientX > right || event.clientY < top || event.clientY > bottom) dismissImage();
+        }}
+        onAnimationEnd={event => {
+          if (event.animationName === "demo-image-dismiss") event.currentTarget.close();
+        }}
+        onClose={event => { delete event.currentTarget.dataset.closing; }}>
+        <button className="diagram-action diagram-close demo-image-close" type="button"
+          aria-label={t("Kapat")} title={t("Kapat")} onClick={dismissImage}>×</button>
+        <Image src={imageUrl} alt={t("T-ERP-024 Finans destek talebinin tamamı")} width={670} height={405} unoptimized />
+      </dialog>
+    </> : image}
     {table && (
-      <div className="thread-table-preview" role="region" aria-label="Soruya eklenen tablo" tabIndex={0}>
+      <div className="thread-table-preview" role="region" aria-label={t("Soruya eklenen tablo")} tabIndex={0}>
         <table>
-          <caption>{table[0]} · {table[3]} satır{table[3] > table[2].length && ` · İlk ${table[2].length} satır`}</caption>
-          <thead><tr>{table[1].map((column, index) => <th key={index} scope="col">{column}</th>)}</tr></thead>
+          <caption>{table[0]} · {t("{total} satır", { total: number.format(table[3]) })}{table[3] > table[2].length &&
+            " · " + t("İlk {total} satır", { total: number.format(table[2].length) })}</caption>
+          <thead><tr>{table[1].map((column, index) => <th key={index} scope="col">{tableLabel?.(column) ?? column}</th>)}</tr></thead>
           <tbody>{table[2].map((row, index) => <tr key={index}>
-            {row.map((cell, column) => <td key={column}>{cell || "—"}</td>)}
+            {row.map((cell, column) => <td key={column}>{(tableLabel?.(cell) ?? cell) || "—"}</td>)}
           </tr>)}</tbody>
         </table>
       </div>
@@ -339,9 +414,10 @@ function ThreadQuestion({ question, thumbnail, table }: {
   </>;
 }
 
-function ThreadTurn({ run, result, exports }: {
-  run: SavedRun; result: JudgeResult; exports: ReactNode;
+function ThreadTurn({ run, result, exports, imageUrl, tableLabel }: {
+  run: SavedRun; result: JudgeResult; exports: ReactNode; imageUrl?: string; tableLabel?: (value: string) => string;
 }) {
+  const { t } = useMessages();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const experts = result.answers.filter(agent => agent.answer && isDiscussionExpert(agent));
   const expert = experts.find(agent => agent.agentId === selectedId);
@@ -349,9 +425,9 @@ function ThreadTurn({ run, result, exports }: {
   return (
     <article className="thread-entry">
       <div className="thread-turn-header">
-        <ThreadQuestion question={run.question} thumbnail={run.imageThumbnail} table={savedTablePreview(run)} />
+        <ThreadQuestion question={run.question} thumbnail={run.imageThumbnail} table={savedTablePreview(run)} imageUrl={imageUrl} tableLabel={tableLabel} />
         <div className="result-toolbar">
-          {experts.length > 0 && <div className="result-experts" role="group" aria-label="Bu sorunun uzman görüşleri">
+          {experts.length > 0 && <div className="result-experts" role="group" aria-label={t("Bu sorunun uzman görüşleri")}>
             <FinalResultButton selected={selectedId === null} onClick={() => setSelectedId(null)} />
             {experts.map(agent => (
               <button key={agent.agentId} type="button" className="robot-head robot-done"
@@ -489,11 +565,12 @@ function JudgingThoughts({ children }: { children: ReactNode }) {
       const bounds = layout.getBoundingClientRect();
       const end = destination.getBoundingClientRect();
       const endX = Math.round(end.left + end.width / 2 - bounds.left);
-      const endY = Math.round(end.bottom - bounds.top);
       setPaths(Array.from(layout.querySelectorAll(".robot-head"), robot => {
         const start = robot.getBoundingClientRect();
         const x = Math.round(start.left + start.width / 2 - bounds.left);
-        const y = Math.round(start.top - bounds.top - 3);
+        const bubbleBelow = end.top >= start.bottom;
+        const endY = Math.round((bubbleBelow ? end.top : end.bottom) - bounds.top);
+        const y = Math.round((bubbleBelow ? start.bottom : start.top) - bounds.top);
         const middle = Math.round((y + endY) / 2);
         return `M ${x} ${y} C ${x} ${middle}, ${endX} ${middle}, ${endX} ${endY}`;
       }));
@@ -506,14 +583,18 @@ function JudgingThoughts({ children }: { children: ReactNode }) {
   return (
     <div className="judging-thoughts" ref={scene}>
       <svg aria-hidden="true" className="thought-streams">
-        {paths.map((path, index) => (
-          <g key={index}>
-            <path d={path} className="thought-stream" />
-            <circle r="2.6" className="thought-pulse">
-              <animateMotion path={path} begin={`${(index % 5) * 0.14}s`} dur="1.35s" repeatCount="indefinite" />
-            </circle>
-          </g>
-        ))}
+        {paths.map((path, index) => {
+          const begin = `${(index % 5) * 0.14}s`;
+          return (
+            <g key={index}>
+              <path d={path} className="thought-stream" />
+              <circle r="2.6" className="thought-pulse" visibility="hidden">
+                <set attributeName="visibility" to="visible" begin={begin} fill="freeze" />
+                <animateMotion path={path} begin={begin} dur="1.35s" repeatCount="indefinite" />
+              </circle>
+            </g>
+          );
+        })}
       </svg>
       <div ref={bubble} className="thinking-bubble" aria-hidden="true"><i /><i /><i /></div>
       {children}
@@ -522,7 +603,8 @@ function JudgingThoughts({ children }: { children: ReactNode }) {
 }
 
 function StatusMark({ status }: { status: AgentStatus }) {
-  return <span className={`status-mark status-${status}`} aria-label={{ waiting: "Bekliyor", working: "Çalışıyor", done: "Tamamlandı", error: "Hata" }[status]} role="img" />;
+  const { t } = useMessages();
+  return <span className={`status-mark status-${status}`} aria-label={{ waiting: t("Bekliyor"), working: t("Çalışıyor"), done: t("Tamamlandı"), error: t("Hata") }[status]} role="img" />;
 }
 
 type DatasetSummary = { id: string; name: string };
@@ -628,29 +710,30 @@ function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savin
   onSave: (run: SavedRun) => Promise<void>;
   onDiagram: (flow: SolutionFlow) => void;
 }) {
+  const { language, t } = useMessages();
   const completed = run.result;
   if (!completed?.agentCount) return null;
   const flow = completed.diagram;
   return (
-    <div className="result-exports" role="group" aria-label="Sonucu dışa aktar">
+    <div className="result-exports" role="group" aria-label={t("Sonucu dışa aktar")}>
       {showDocs && (docsDisabled ? (
-        <a className="result-export" href={managedSetup ? "#google-docs-setup" : "/docs/google-docs.txt"} aria-label="Google Docs kurulumu" onClick={event => {
+        <a className="result-export" href={managedSetup ? "#google-docs-setup" : setupGuide("google-docs", language)} aria-label={t("Google Docs kurulumu")} onClick={event => {
           if (!managedSetup) return;
           event.preventDefault();
           onSetup();
-        }}><ExportIcon kind="docs" /><span className="expert-tooltip" aria-hidden="true">Google Docs kurulumu</span></a>
+        }}><ExportIcon kind="docs" /><span className="expert-tooltip" aria-hidden="true">{t("Google Docs kurulumu")}</span></a>
       ) : documentUrl ? (
         <a className="result-export" href={documentUrl} target="_blank" rel="noreferrer"
-          aria-label="Google Docs’u aç"><ExportIcon kind="docs" /><span className="expert-tooltip" aria-hidden="true">Google Docs’u aç</span></a>
+          aria-label={t("Google Docs’u aç")}><ExportIcon kind="docs" /><span className="expert-tooltip" aria-hidden="true">{t("Google Docs’u aç")}</span></a>
       ) : (
         <button type="button" className="result-export" onClick={() => void onSave(run)} disabled={savingDocs} aria-busy={savingDocs}
-          aria-label={savingDocs ? "Google Docs’a kaydediliyor" : "Google Docs’a kaydet"}>
+          aria-label={savingDocs ? t("Google Docs’a kaydediliyor") : t("Google Docs’a kaydet")}>
           <ExportIcon kind="docs" />
-          <span className="expert-tooltip" aria-hidden="true">Docs’a kaydet</span>
+          <span className="expert-tooltip" aria-hidden="true">{t("Docs’a kaydet")}</span>
         </button>
       ))}
-      {flow && canShowStoredDiagram(completed.showDiagram, flow) && <button className="result-export" type="button" aria-label="Çözüm akışını göster"
-        aria-haspopup="dialog" onClick={() => onDiagram(flow)}><ExportIcon kind="diagram" /><span className="expert-tooltip" aria-hidden="true">Diyagramı göster</span></button>}
+      {flow && canShowStoredDiagram(completed.showDiagram, flow) && <button className="result-export" type="button" aria-label={t("Çözüm akışını göster")}
+        aria-haspopup="dialog" onClick={() => onDiagram(flow)}><ExportIcon kind="diagram" /><span className="expert-tooltip" aria-hidden="true">{t("Diyagramı göster")}</span></button>}
     </div>
   );
 }
@@ -660,6 +743,19 @@ export default function Home() {
 }
 
 export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?: DemoScenario }) {
+  return <WorkspaceLanguage desktop={desktop}><WorkspaceContent desktop={desktop} demo={demo} /></WorkspaceLanguage>;
+}
+
+function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScenario }) {
+  const { language, t } = useMessages();
+  const presentation = useMemo(() => demo?.presentation(language), [demo, language]);
+  const showQuestionText = (text: string) => presentation?.question(text) ?? text;
+  const previewNumber = new Intl.NumberFormat(language, { maximumSignificantDigits: 6 });
+  const pageTitle = t(demo ? "Ortak Akıl | Tarayıcı demosu" : "Ortak Akıl — Çoklu Uzman Karar Alanı");
+  useEffect(() => {
+    document.documentElement.lang = language;
+    if (!desktop) document.title = pageTitle;
+  }, [desktop, language, pageTitle]);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const setupBlocked = !!setup?.enabled && (!setup.configured || !setup.connected || !!setup.installing);
   const [question, setQuestion] = useState(demo?.question ?? "");
@@ -669,6 +765,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
   const [showWorkspace, setShowWorkspace] = useState(false);
   const questionAttachment = useAttachment(desktop, demo?.csv);
   const followUpAttachment = useAttachment(desktop);
+  const demoAttempt = useRef<string | undefined>(undefined);
   const { csvSource, csv,
     readingCsv, csvError, tableProfile, loadAttachment, openDataset, media, setCsvError } = showWorkspace ? followUpAttachment : questionAttachment;
   const [draggingAttachment, setDraggingAttachment] = useState(false);
@@ -679,7 +776,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
   const [modelChoice, setModelChoice] = useState("default");
   const [customModel, setCustomModel] = useState("");
   const defaultModel = setup?.defaultModel || "gpt-5-mini";
-  const openaiModel = modelChoice === "custom" ? customModel : modelChoice === "default" ? defaultModel : modelChoice;
+  const openaiModel = demo?.model.id ?? (modelChoice === "custom" ? customModel : modelChoice === "default" ? defaultModel : modelChoice);
   const [stage, setStage] = useState<Stage>("idle");
   const isBusy = ["planning", "working", "judging"].includes(stage);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -724,8 +821,8 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
   const [searchOpen, setSearchOpen] = useState(false);
   const historySearchField = useRef<HTMLInputElement>(null);
   const [historySearch, setHistorySearch] = useState("");
-  const historyQuery = historySearch.trim().normalize("NFC").toLocaleLowerCase("tr-TR");
-  const visibleHistory = historyGroups.filter(group => group.question.normalize("NFC").toLocaleLowerCase("tr-TR").includes(historyQuery));
+  const historyQuery = historySearch.trim().normalize("NFC").toLocaleLowerCase(language);
+  const visibleHistory = historyGroups.filter(group => showQuestionText(group.question).normalize("NFC").toLocaleLowerCase(language).includes(historyQuery));
   const [historyError, setHistoryError] = useState("");
   const evaluation = useRef<AbortController | null>(null);
   const [displayQuestion, setDisplayQuestion] = useState("");
@@ -848,8 +945,8 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
     }
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    viewport.scrollTo({ top: turn.offsetTop, behavior: reducedMotion ? "instant" : "smooth" });
-  }, [scrollRequest, showWorkspace]);
+    viewport.scrollTo({ top: turn.offsetTop, behavior: demo || reducedMotion ? "instant" : "smooth" });
+  }, [demo, scrollRequest, showWorkspace]);
 
   function showResults(mode: "bottom" | "turn" = "turn") {
     setShowWorkspace(true);
@@ -857,7 +954,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
     setScrollRequest(value => value + 1);
   }
 
-  async function refreshHistory() {
+  const refreshHistory = useCallback(async () => {
     const version = ++historyListVersion.current;
     try {
       const { groups } = await readHistory<{ groups: HistoryGroup[] }>({ action: "list" });
@@ -867,7 +964,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
     } catch {
       if (version === historyListVersion.current) setHistoryError("Değerlendirmeler okunamadı.");
     }
-  }
+  }, []);
 
   useEffect(() => {
     const refreshTimer = window.setTimeout(refreshHistory, 0);
@@ -881,7 +978,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
       historyOpenVersion.current++;
       window.removeEventListener("focus", refreshHistory);
     };
-  }, []);
+  }, [refreshHistory]);
 
   async function readGroup(key: string) {
     return (await readHistory<{ runs: SavedRun[] }>({ action: "group", key })).runs;
@@ -902,7 +999,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
         await refreshHistory();
         return;
       }
-      void followUpAttachment.loadAttachment(undefined);
+      if (!demo) void followUpAttachment.loadAttachment(undefined);
       openSaved(completed, runs);
     } catch {
       if (version === historyOpenVersion.current) setHistoryError("Sohbet yüklenemedi.");
@@ -969,7 +1066,14 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
 
   function openSaved(run: SavedRun, entries: SavedRun[], position: "bottom" | "preserve" = "bottom") {
     if (!run.result) return;
-    setFollowUpQuestion(demo?.followUp ?? "");
+    if (demo) {
+      const index = demo.followUps.findIndex(turn => turn.question === run.question);
+      const next = demo.followUps[index + 1];
+      setFollowUpQuestion(next?.question ?? "");
+      void followUpAttachment.loadAttachment(next?.attachment);
+    } else {
+      setFollowUpQuestion("");
+    }
     setSettingsOpen(false);
     setCsvOpen(false);
     const question = run.plan?.question ?? run.result.question ?? run.question;
@@ -992,21 +1096,28 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
 
   const completedCount = agents.filter(agent => agent.status === "done").length;
   const selectedAgent = useMemo(
-    () => typeof selected === "number" ? agents.find(agent => agent.agentId === selected) : undefined,
-    [agents, selected],
+    () => {
+      const agent = typeof selected === "number" ? agents.find(agent => agent.agentId === selected) : undefined;
+      return agent && (presentation?.agent(displayQuestion, agent) ?? agent);
+    },
+    [agents, selected, presentation, displayQuestion],
   );
   const diagramDialog = useRef<HTMLDialogElement>(null);
-  const [diagram, setDiagram] = useState({ diagramSvg: "", diagramTitle: "" });
-  const { diagramSvg, diagramTitle } = diagram;
+  const [diagram, setDiagram] = useState<{ flow: SolutionFlow; question: string }>();
+  const diagramTitle = t("Çözüm akışı");
+  const diagramSvg = diagram ? renderSolutionDiagram(
+    presentation?.diagram(diagram.question, diagram.flow) ?? diagram.flow,
+  ) : "";
 
   async function submitEvaluation(followUp?: SavedRun) {
     const draft = followUp ? followUpQuestion : question;
-    const cleanQuestion = draft.trim() || (hasAttachment ? "Ekli dosyayı incele." : "");
+    const cleanQuestion = draft.trim() || (hasAttachment ? t("Ekli dosyayı incele.") : "");
     const model = openaiModel.trim();
     if (!cleanQuestion || !model || submitting.current || savingDocs) return;
     if (attachmentBlocked) return;
 
     const isNewQuestion = !followUp;
+    if (demo && isNewQuestion) demoAttempt.current ??= crypto.randomUUID();
     if (isNewQuestion) setQuestionError("");
     historyOpenVersion.current++;
     setOpeningHistory(false);
@@ -1019,7 +1130,8 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
     try {
       const { kind, run } = await runEvaluation({
         question: cleanQuestion, model, followUp, previousTurns, csvSource, table: csv.table,
-        media, setupBlocked, signal,
+        media, requestScope: demo && isNewQuestion ? demoAttempt.current : undefined,
+        setupBlocked, signal,
       }, {
         postStage,
         historyRequest,
@@ -1065,7 +1177,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
           void questionAttachment.loadAttachment(undefined);
         }
       }
-      if (kind !== "direct") void followUpAttachment.loadAttachment(undefined);
+      if (!demo && kind !== "direct") void followUpAttachment.loadAttachment(undefined);
     } catch (runError) {
       if (followUp) {
         openSaved(followUp, prior);
@@ -1116,8 +1228,8 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
     requestAnimationFrame(() => document.getElementById("google-docs-setup")?.scrollIntoView({ block: "nearest" }));
   }
 
-  function showSolutionDiagram(flow: SolutionFlow) {
-    setDiagram({ diagramSvg: renderSolutionDiagram(flow), diagramTitle: "Çözüm akışı" });
+  function showSolutionDiagram(flow: SolutionFlow, question: string) {
+    setDiagram({ flow, question });
     diagramDialog.current?.showModal();
   }
 
@@ -1125,10 +1237,10 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
     const documentUrl = googleDocumentUrl(docsLinks[run.id] ?? run.documentUrl);
     return <EvaluationExports showDocs={!demo} run={run} documentUrl={documentUrl}
       docsDisabled={setup?.docsEnabled !== true && !documentUrl} managedSetup={setup?.enabled === true} savingDocs={savingDocs} onSetup={showDocsSetup}
-      onSave={saveToDocs} onDiagram={showSolutionDiagram} />;
+      onSave={saveToDocs} onDiagram={flow => showSolutionDiagram(flow, run.question)} />;
   }
 
-  const discussionExperts = agents.filter(isDiscussionExpert);
+  const discussionExperts = agents.filter(isDiscussionExpert).map(agent => presentation?.agent(displayQuestion, agent) ?? agent);
   function renderProgressRobots() {
     const robots = (
       <div className="robot-row">
@@ -1145,7 +1257,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
     return stage === "judging" ? <JudgingThoughts>{robots}</JudgingThoughts> : robots;
   }
 
-  const expertNavigation = ((result && discussionExperts.length > 0) || (isBusy && selectedAgent)) && <div className={isBusy ? "result-experts experts-running" : "result-experts"} role="group" aria-label="Uzman görüşleri">
+  const expertNavigation = ((result && discussionExperts.length > 0) || (isBusy && selectedAgent)) && <div className={isBusy ? "result-experts experts-running" : "result-experts"} role="group" aria-label={t("Uzman görüşleri")}>
               <FinalResultButton selected={selected === "final"} onClick={() => setSelected("final")} />
               {discussionExperts.map(agent => (
                 <button key={agent.agentId} type="button" className={`robot-head robot-${agent.status}`}
@@ -1203,78 +1315,89 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
     attachFile(files[0]);
   }
 
+  const demoImage = demo && media && presentation?.imageUrl(followUpQuestion);
+  const displayAttachmentName = demoImage ? t("Örnek Finans talebi.png") : attachmentName;
   const attachmentCard = !isBusy && (attachmentName || readingCsv || csvError || csv.error) && (
     <div className="attachment-preview">
       {media?.mime.startsWith("image/") && media.preview && (
-        <Image src={media.preview} alt="" width={48} height={48} unoptimized />
+        <Image src={demoImage || media.preview} alt={demo ? t("Örnek Finans talebi ekran görüntüsü") : ""} width={48} height={48} unoptimized />
       )}
       <div className="attachment-description">
-        {attachmentName && <strong title={attachmentName}>{attachmentName}</strong>}
+        {displayAttachmentName && <strong title={displayAttachmentName}>{displayAttachmentName}</strong>}
         {media && <small>{media.mime === "application/pdf" ? "PDF" : media.mime === "image/png" ? "PNG" : "JPG"} · {Math.ceil(media.file.size / 1024)} KB</small>}
-        {media?.mime === "application/pdf" && <a href={media.preview} target="_blank" rel="noreferrer">PDF’yi önizle</a>}
-        {readingCsv && <span role="status">Dosya okunuyor…</span>}
-        {(csvError || csv.error) && <span role="alert">{csvError || csv.error}</span>}
+        {media?.mime === "application/pdf" && <a href={media.preview} target="_blank" rel="noreferrer">{t("PDF’yi önizle")}</a>}
+        {readingCsv && <span role="status">{t("Dosya okunuyor…")}</span>}
+        {(csvError || csv.error) && <span role="alert">{t(csvError || csv.error)}</span>}
       </div>
-      {!readingCsv && <button type="button" className="text-button attachment-remove" aria-label="Eki kaldır" disabled={!!demo}
+      {!readingCsv && <button type="button" className="text-button attachment-remove" aria-label={t("Eki kaldır")} disabled={!!demo}
         onClick={() => { void loadAttachment(undefined); setCsvOpen(false); }}>×</button>}
     </div>
   );
 
   const composerTools = (
     <>
-      <button type="button" className="settings-toggle text-button" aria-label="Ayarlar" title="Ayarlar"
+      <button type="button" className="settings-toggle text-button" aria-label={t("Ayarlar")} title={t("Ayarlar")}
         aria-expanded={settingsOpen} aria-controls="evaluation-settings"
         onClick={() => { setModelPickerOpen(false); setCsvOpen(false); setSettingsOpen(open => !open); }}>
         <span className="settings-sliders" aria-hidden="true"><i /><i /><i /></span>
       </button>
-      <button type="button" className={`settings-toggle text-button${demo ? " demo-attachment-toggle" : hasAttachment ? " csv-attached" : ""}`} title={attachmentName ?? "Dosya ekle"}
-        aria-label="Dosya ekle"
+      <button type="button" className={`settings-toggle text-button${!demo && hasAttachment ? " csv-attached" : ""}`} title={displayAttachmentName ?? t("Dosya ekle")}
+        aria-label={t("Dosya ekle")}
         aria-expanded={csvOpen} aria-controls="csv-panel" onClick={() => { setModelPickerOpen(false); setSettingsOpen(false); setCsvOpen(open => !open); }}>
         <span aria-hidden="true">+</span>
       </button>
     </>
   );
 
-  const panelTable = demo ? questionAttachment.csv.table : csv.table;
+  const panelTable = demo && !demoImage ? questionAttachment.csv.table : csv.table;
+  const tableSummary = panelTable && <p><b>{panelTable.name}</b> · {t("{total} satır", { total: panelTable.rows.length })} · {t("{total} sütun", { total: panelTable.columns.length })}</p>;
+  const defaultLabel = t("Varsayılan · {model}", { model: defaultModel === "gpt-5-mini" ? "GPT-5 mini" : defaultModel });
   const composerPanels = (
     <>
     <div id="csv-panel" className="composer-panel csv-input" data-table={!!panelTable}
-      data-open={csvOpen} inert={!csvOpen} role="group" aria-label="Dosya ekle">
-      {demo ? (
-        <a className="text-button attachment-choose" href={demo.download} download={demo.csv.name}>Örnek CSV’yi indir</a>
+      data-open={csvOpen} inert={!csvOpen} role="group" aria-label={t("Dosya ekle")}>
+      {demoImage ? (
+        <Image className="demo-ticket-preview" src={demoImage} alt={t("Örnek Finans talebi ekran görüntüsü")}
+          width={670} height={405} unoptimized />
+      ) : demo ? (
+        <div className="demo-csv-header">
+          {tableSummary}
+          <a className="text-button attachment-choose demo-csv-download" href={demo.download} download={demo.csv.name}
+            aria-label={t("Örnek CSV’yi indir")} title={t("Örnek CSV’yi indir")}><DownloadIcon /></a>
+        </div>
       ) : <>
         <input id="csv-file" type="file" hidden accept={ATTACHMENT_ACCEPT} disabled={!canAttach || readingCsv}
           onChange={event => { attachFile(event.target.files?.[0]); event.target.value = ""; }} />
         <button type="button" className="text-button attachment-choose" disabled={!canAttach || readingCsv}
           onClick={event => event.currentTarget.parentElement?.querySelector<HTMLInputElement>("#csv-file")?.click()}>
-          Dosya seç
+          {t("Dosya seç")}
         </button>
       </>}
       {desktop && <>
         <label className="desktop-dataset-picker">
-          Kayıtlı veri kümeleri
-          <select aria-label="Kayıtlı veri kümeleri" value={csvSource?.id ?? ""} disabled={!canAttach || readingCsv}
+          {t("Kayıtlı veri kümeleri")}
+          <select aria-label={t("Kayıtlı veri kümeleri")} value={csvSource?.id ?? ""} disabled={!canAttach || readingCsv}
             onChange={event => { if (event.target.value) void openDataset(event.target.value); }}>
-            <option value="" disabled>Veri kümesi seçin</option>
+            <option value="" disabled>{t("Veri kümesi seçin")}</option>
             {datasets.map(dataset => <option key={dataset.id} value={dataset.id}>{dataset.name} · {dataset.id.slice(0, 6)}</option>)}
           </select>
         </label>
-        {datasetError && <p role="alert">{datasetError}</p>}
+        {datasetError && <p role="alert">{t(datasetError)}</p>}
         <p>İçe aktarılan CSV bu Mac’te saklanır. Değerlendirme sırasında soru, dosya adı, sütun özeti ve ilk 10 satır OpenAI’ye gönderilir. JPG, PNG ve PDF eklerinin tamamı OpenAI’ye gönderilir.</p>
       </>}
       {panelTable && <>
-        <p><b>{panelTable.name}</b> · {panelTable.rows.length} satır · {panelTable.columns.length} sütun</p>
-        <div className="table-preview" tabIndex={0} role="region" aria-label="CSV önizlemesi"><table>
-          <caption>İlk 5 satırın önizlemesi</caption>
-          <thead><tr>{panelTable.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
-          <tbody>{panelTable.rows.slice(0, 5).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} title={cell}>{cell}</td>)}</tr>)}</tbody>
+        {!demo && tableSummary}
+        <div className="table-preview" tabIndex={0} role="region" aria-label={t("CSV önizlemesi")}><table>
+          <caption>{t("İlk 5 satırın önizlemesi")}</caption>
+          <thead><tr>{panelTable.columns.map(column => <th key={column} scope="col">{presentation?.tableLabel(column) ?? column}</th>)}</tr></thead>
+          <tbody>{panelTable.rows.slice(0, 5).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} title={presentation?.tableLabel(cell) ?? cell}>{presentation?.tableLabel(cell) ?? cell}</td>)}</tr>)}</tbody>
         </table></div>
         {!demo &&
-          <div className="table-preview" tabIndex={0} role="region" aria-label="Sütun istatistikleri"><table>
-            <caption>Tüm dosya üzerinden hesaplanan özet</caption>
-            <thead><tr><th scope="col">Sütun</th><th scope="col">Tür</th><th scope="col">Eksik</th><th scope="col">Toplam</th><th scope="col">Ortalama</th><th scope="col">Min / Maks</th></tr></thead>
+          <div className="table-preview" tabIndex={0} role="region" aria-label={t("Sütun istatistikleri")}><table>
+            <caption>{t("Tüm dosya üzerinden hesaplanan özet")}</caption>
+            <thead><tr><th scope="col">{t("Sütun")}</th><th scope="col">{t("Tür")}</th><th scope="col">{t("Eksik")}</th><th scope="col">{t("Toplam")}</th><th scope="col">{t("Ortalama")}</th><th scope="col">{t("Min / Maks")}</th></tr></thead>
             <tbody>{tableProfile.map(column => <tr key={column.name}>
-              <td>{column.name}</td><td>{column.type === "number" ? "Sayı" : "Metin"}</td><td>{column.missing}</td>
+              <td>{column.name}</td><td>{column.type === "number" ? t("Sayı") : t("Metin")}</td><td>{column.missing}</td>
               <td>{column.statistics ? previewNumber.format(column.statistics.sum) : "—"}</td><td>{column.statistics ? previewNumber.format(column.statistics.mean) : "—"}</td>
               <td>{column.statistics ? `${previewNumber.format(column.statistics.min)} / ${previewNumber.format(column.statistics.max)}` : "—"}</td>
             </tr>)}</tbody>
@@ -1283,62 +1406,67 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
     </div>
     <div id="evaluation-settings" className="composer-panel evaluation-options"
       data-open={settingsOpen} inert={!settingsOpen} aria-labelledby="evaluation-settings-title">
-    <h2 className="composer-panel-title" id="evaluation-settings-title">Ayarlar</h2>
+    <h2 className="composer-panel-title" id="evaluation-settings-title">{t("Ayarlar")}</h2>
     <div className="model-field">
-      <span id="model-label">Kullanılacak model</span>
-      <div className="model-picker">
-        <button ref={modelTrigger} id="openai-model" type="button" disabled={isBusy}
-          aria-labelledby="model-label model-selection" aria-controls="model-choices" aria-expanded={modelPickerOpen}
-          onClick={() => setModelPickerOpen(open => !open)}>
-          <span id="model-selection">{modelChoice === "default"
-            ? `Varsayılan · ${defaultModel === "gpt-5-mini" ? "GPT-5 mini" : defaultModel}`
-            : modelOptions.find(model => model.id === modelChoice)?.label ?? "Başka bir model kullan"}</span>
-        </button>
-        <div ref={modelChoices} id="model-choices" className="model-choices" popover="manual">
-          {[
-            { id: "default", label: `Varsayılan · ${defaultModel === "gpt-5-mini" ? "GPT-5 mini" : defaultModel}` },
-            ...modelOptions,
-            { id: "custom", label: "Başka bir model kullan" },
-          ].map(model => (
-            <button type="button" key={model.id} data-model={model.id} aria-pressed={modelChoice === model.id} onClick={() => {
-              setModelChoice(model.id);
-              setModelPickerOpen(false);
-              modelTrigger.current?.focus();
-            }}>{model.label}</button>
-          ))}
-        </div>
-      </div>
-      {modelChoice === "custom" && <>
-        <label htmlFor="custom-model">Model kimliği</label>
-        <input id="custom-model" form={showWorkspace ? "follow-up-form" : "evaluation-form"} value={customModel} onChange={event => setCustomModel(event.target.value)}
-          placeholder="Hesabınızdaki model kimliğini girin" disabled={isBusy} required
-          autoComplete="off" spellCheck={false} />
-      </>}
-
+      <span id="model-label">{t("Kullanılacak model")}</span>
+      {demo ? (
+        <span className="demo-model-value">{demo.model.label}</span>
+      ) : (
+        <>
+          <div className="model-picker">
+            <button ref={modelTrigger} id="openai-model" type="button" disabled={isBusy}
+              aria-labelledby="model-label model-selection" aria-controls="model-choices" aria-expanded={modelPickerOpen}
+              onClick={() => setModelPickerOpen(open => !open)}>
+              <span id="model-selection">{modelChoice === "default"
+                ? defaultLabel
+                : t(modelOptions.find(model => model.id === modelChoice)?.label ?? "Başka bir model kullan")}</span>
+            </button>
+            <div ref={modelChoices} id="model-choices" className="model-choices" popover="manual">
+              {[
+                { id: "default", label: defaultLabel },
+                ...modelOptions,
+                { id: "custom", label: t("Başka bir model kullan") },
+              ].map(model => (
+                <button type="button" key={model.id} data-model={model.id} aria-pressed={modelChoice === model.id} onClick={() => {
+                  setModelChoice(model.id);
+                  setModelPickerOpen(false);
+                  modelTrigger.current?.focus();
+                }}>{t(model.label)}</button>
+              ))}
+            </div>
+          </div>
+          {modelChoice === "custom" && <>
+            <label htmlFor="custom-model">{t("Model kimliği")}</label>
+            <input id="custom-model" form={showWorkspace ? "follow-up-form" : "evaluation-form"} value={customModel} onChange={event => setCustomModel(event.target.value)}
+              placeholder={t("Hesabınızdaki model kimliğini girin")} disabled={isBusy} required
+              autoComplete="off" spellCheck={false} />
+          </>}
+        </>
+      )}
     </div>
     {!demo && <Setup onStatus={updateSetup} desktop={desktop} />}
-    {historyGroups.length > 0 && <HistoryDisclosure className="history-management" summary={<h2>Değerlendirme kayıtları</h2>}>
-      {historyError && <p className="history-error" role="status">{historyError}</p>}
+    {historyGroups.length > 0 && <HistoryDisclosure className="history-management" summary={<h2>{t("Değerlendirme kayıtları")}</h2>}>
+      {historyError && <p className="history-error" role="status">{t(historyError)}</p>}
       {historyGroups.map(group => {
         const runs = managementRuns[group.key];
 
         return <div className="history-records" key={group.key}>
-          <HistoryDisclosure summaryClassName="history-record-heading" summary={group.question}
+          <HistoryDisclosure summaryClassName="history-record-heading" summary={showQuestionText(group.question)}
             onOpen={() => void loadManagementGroup(group.key)}>
             {runs ? <ul className="history-runs">
               {runs.map(run => <li className="history-entry" key={run.id}>
                 <div className="history-record-meta">
-                  <span>{run.question}</span>
-                  <small>{run.model} · {new Date(historyTime(run)).toLocaleString("tr-TR")}</small>
+                  <span>{showQuestionText(run.question)}</span>
+                  <small>{run.model} · {new Date(historyTime(run)).toLocaleString(language)}</small>
                 </div>
                 {run.followUpPrompt && <button type="button" className="history-delete" disabled={isBusy || savingDocs || deletingHistory}
-                  aria-label="Takip sorusunu sil" title="Takip sorusunu sil"
+                  aria-label={t("Takip sorusunu sil")} title={t("Takip sorusunu sil")}
                   onClick={event => void deleteHistory({ action: "delete", id: run.id }, event.currentTarget.closest("li"))}>×</button>}
               </li>)}
-            </ul> : !historyError && <p role="status">Kayıtlar yükleniyor…</p>}
+            </ul> : !historyError && <p role="status">{t("Kayıtlar yükleniyor…")}</p>}
           </HistoryDisclosure>
           <button type="button" className="history-delete" disabled={isBusy || savingDocs || deletingHistory}
-            aria-label={`Soruyu ve takiplerini sil: ${group.question}`} title="Soruyu ve takiplerini sil"
+            aria-label={t("Soruyu ve takiplerini sil") + ": " + showQuestionText(group.question)} title={t("Soruyu ve takiplerini sil")}
             onClick={event => void deleteHistory({ action: "deleteGroup", key: group.key }, event.currentTarget.closest<HTMLElement>(".history-records"))}>×</button>
         </div>;
       })}
@@ -1348,7 +1476,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
   );
 
   return (
-    <main className="app-shell"
+    <main className="app-shell" data-demo={!!demo}
       onDragEnter={event => {
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
@@ -1367,7 +1495,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
       onDrop={onAttachmentDrop}>
       {draggingAttachment && canAttach && (
         <div className="attachment-drop-overlay" aria-hidden="true">
-          <span>Dosyayı buraya bırakın</span>
+          <span>{t("Dosyayı buraya bırakın")}</span>
         </div>
       )}
       <header className="topbar">
@@ -1375,20 +1503,24 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
           <Image className="brand-logo" src={brandLogo} width={44} height={44} alt="" priority unoptimized />
           <span className="brand-name">Ortak Akıl</span>
         </div>
+        {!desktop && <LanguageSelect />}
       </header>
 
       <div className="evaluation-layout">
         <aside className="run-history" aria-labelledby="history-title" data-open={historyOpen}>
           <button type="button" id="history-title" className="history-toggle text-button"
-            aria-label="Değerlendirmeler" title="Değerlendirmeler" aria-expanded={historyOpen}
+            aria-label={t("Değerlendirmeler")} title={t("Değerlendirmeler")} aria-expanded={historyOpen}
             aria-controls="history-panel" onClick={() => setHistoryOpen(open => !open)}>
             <span className="history-toggle-icon" aria-hidden="true" />
           </button>
           <div id="history-panel" className="history-content" inert={!historyOpen}>
             <div className="history-heading-row">
-              <h2 className="history-heading">Değerlendirmeler</h2>
-              <button type="button" className="text-button sidebar-new-question" aria-label="Yeni soru" title="Yeni soru"
+              <h2 className="history-heading">{t("Değerlendirmeler")}</h2>
+              <button type="button" className="text-button sidebar-new-question" aria-label={t("Yeni soru")} title={t("Yeni soru")}
                 disabled={isBusy || savingDocs} onClick={() => {
+                  historyOpenVersion.current++;
+                  setOpeningHistory(false);
+                  demoAttempt.current = undefined;
                   setFollowUpQuestion("");
                   void followUpAttachment.loadAttachment(undefined);
                   setSettingsOpen(false);
@@ -1403,7 +1535,7 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
                   <path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6M11 13l1-4 7-7 3 3-7 7-4 1Z" />
                 </svg>
               </button>
-              <button type="button" className="sidebar-search-toggle text-button" aria-label="Geçmişte soru ara"
+              <button type="button" className="sidebar-search-toggle text-button" aria-label={t("Geçmişte soru ara")}
                 aria-expanded={searchOpen} aria-controls="history-search-field" onClick={() => { setSearchOpen(!searchOpen); setHistorySearch(""); }}>
                 <span className="search-icon" aria-hidden="true" />
               </button>
@@ -1411,21 +1543,21 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
             <div id="history-search-field" className="history-search-field" data-open={searchOpen} inert={!searchOpen}>
               <div>
                 <input ref={historySearchField} className="history-search" type="search"
-                  aria-label="Geçmişte soru ara" placeholder="Soru ara" value={historySearch}
+                  aria-label={t("Geçmişte soru ara")} placeholder={t("Soru ara")} value={historySearch}
                   onChange={event => setHistorySearch(event.target.value)} />
               </div>
             </div>
-            {historyError && <p className="history-error" role="status">{historyError}</p>}
-            {!historyError && historyQuery && visibleHistory.length === 0 && <p>Eşleşen soru yok.</p>}
-            <span className="sr-only" role="status">{openingHistory ? "Sohbet yükleniyor…" : ""}</span>
+            {historyError && <p className="history-error" role="status">{t(historyError)}</p>}
+            {!historyError && historyQuery && visibleHistory.length === 0 && <p>{t("Eşleşen soru yok.")}</p>}
+            <span className="sr-only" role="status">{openingHistory ? t("Sohbet yükleniyor…") : ""}</span>
             <ul className="history-list" aria-busy={openingHistory}>
               {visibleHistory.map(group => (
                 <li className="history-group" key={group.key}>
-                  {group.completed ? <button type="button" className="history-question text-button" title={group.question}
+                  {group.completed ? <button type="button" className="history-question text-button" title={showQuestionText(group.question)}
                     aria-current={group.key === activeHistoryKey ? "true" : undefined}
                     disabled={isBusy || savingDocs || group.key === activeHistoryKey} onClick={() => void openHistoryGroup(group.key)}>
-                    {group.question}
-                  </button> : <span className="history-question">{group.question}</span>}
+                    {showQuestionText(group.question)}
+                  </button> : <span className="history-question">{showQuestionText(group.question)}</span>}
                 </li>
               ))}
             </ul>
@@ -1433,10 +1565,10 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
         </aside>
       <div className="evaluation-main" id="top">
       {!showWorkspace && !demo && (
-        <div className="question-examples" aria-label="Örnek ERP sorusu">
+        <div className="question-examples" aria-label={t("Örnek ERP sorusu")}>
           {exampleQuestions.map((example, index) =>
             <p key={example} style={{ animationDelay: `${index * 6}s` }}
-              aria-hidden={index > 0}>{example}</p>
+              aria-hidden={index > 0}>{t(example)}</p>
           )}
         </div>
       )}
@@ -1449,9 +1581,9 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
             readOnly={!!demo}
             onPointerDown={closeComposerPanels}
             onFocus={closeComposerPanels}
-            aria-label="Değerlendirilecek soru"
+            aria-label={t("Değerlendirilecek soru")}
             ref={questionField}
-            value={question}
+            value={showQuestionText(question)}
             onChange={event => setQuestion(event.target.value)}
             onKeyDown={event => {
               if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
@@ -1464,18 +1596,18 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
               }
               if (!event.repeat) field.form?.requestSubmit();
             }}
-            placeholder="Sorunuzu yazın"
+            placeholder={t("Sorunuzu yazın")}
             rows={1}
             disabled={isBusy}
           />
           <div className="composer-tools">
             {composerTools}
-            <button className="primary-button symbol-send" type="submit" data-running={isBusy} aria-busy={isBusy} aria-label="Uzmanları çalıştır" title="Uzmanları çalıştır" disabled={(!question.trim() && !hasAttachment) || !openaiModel.trim() || isBusy || savingDocs || attachmentBlocked}>
-              <SendSymbol />
+            <button className="primary-button symbol-send" type="submit" data-running={isBusy} aria-busy={isBusy} aria-label={t("Uzmanları çalıştır")} title={t("Uzmanları çalıştır")} disabled={(!question.trim() && !hasAttachment) || !openaiModel.trim() || isBusy || savingDocs || attachmentBlocked}>
+              <SendSymbol demo={!!demo} />
             </button>
           </div>
-          {questionError && <p className="question-error" role="alert">{questionError}</p>}
-          {stage === "cancelled" && <p className="evaluation-notice" role="status">Değerlendirme durduruldu.</p>}
+          {questionError && <p className="question-error" role="alert">{t(questionError)}</p>}
+          {stage === "cancelled" && <p className="evaluation-notice" role="status">{t("Değerlendirme durduruldu.")}</p>}
         </form>
           {!showWorkspace && composerPanels}
         </div>
@@ -1484,15 +1616,27 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
 
       {showWorkspace && (
         <section className="workspace" aria-live="polite">
-          <div className="thread-scroll" key={scrollRequest} role="region" aria-label="Sohbet mesajları" tabIndex={0}>
+          <div className="thread-scroll" key={scrollRequest} role="region" aria-label={t("Sohbet mesajları")} tabIndex={0}>
           {previousTurns.map(run => run.result && <ThreadTurn key={`${scrollRequest}:${run.id}`}
-            run={run} result={run.result} exports={resultExports(run)} />)}
+            run={{ ...run, question: showQuestionText(run.question) }} result={presentation?.result(run.question, run.result) ?? run.result}
+            exports={resultExports(run)} imageUrl={presentation?.imageUrl(run.question)} tableLabel={presentation?.tableLabel} />)}
           <article ref={currentTurn} className={isBusy ? "result-panel result-panel-running" : "result-panel"}>
             <div className="thread-turn-header">
-              {displayQuestion && <ThreadQuestion question={displayQuestion} thumbnail={displayThumbnail} table={displayTable} />}
+              {displayQuestion && <ThreadQuestion question={showQuestionText(displayQuestion)} thumbnail={displayThumbnail}
+                table={displayTable} imageUrl={presentation?.imageUrl(displayQuestion)} tableLabel={presentation?.tableLabel} />}
             </div>
             <div className="result-toolbar">
-              {expertNavigation}
+              {demo && isBusy ? (
+                <div className="demo-progress-row">
+                  {selectedAgent && <div className="demo-progress-return result-experts">
+                    <FinalResultButton selected={false} onClick={() => setSelected("final")} />
+                  </div>}
+                  <span className="sr-only" role="status">{stage === "planning" ? t("Değerlendirme başlatılıyor.")
+                    : stage === "judging" ? t("Ortak karar hazırlanıyor.")
+                    : t("{completed} / {total} uzman tamamlandı.", { completed: completedCount, total: agents.length })}</span>
+                  {stage === "planning" ? <PlanningCrew fixedCount={demo.expertCount(displayQuestion)} /> : renderProgressRobots()}
+                </div>
+              ) : expertNavigation}
               {activeRecord && resultExports(activeRecord)}
             </div>
             <AnimatedAnswer view={selectedAgent?.answer ? `${selectedAgent.agentId}:ready` : isBusy && selected === "final" ? "progress" : selected}>
@@ -1500,12 +1644,14 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
                 <>
                   <ExpertTask role={selectedAgent.role} task={selectedAgent.task} />
                   {selectedAgent.answer && <RichText text={splitExpertAnswer(selectedAgent.answer).answer} />}
-                  {selectedAgent.error && !selectedAgent.answer && <p className="evaluation-error">{selectedAgent.error}</p>}
+                  {selectedAgent.error && !selectedAgent.answer && <p className="evaluation-error">{t(selectedAgent.error)}</p>}
                 </>
               ) : (
                 <>
                   {result ? (
-                    <ResultText result={result} />
+                    <ResultText result={presentation?.result(displayQuestion, result) ?? result} />
+                  ) : demo && isBusy ? (
+                    <div className="empty-result" aria-hidden="true" />
                   ) : (
                     <div className="empty-result">
                       {stage === "planning" || agents.length ? (
@@ -1513,14 +1659,14 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
                           <div className="progress-robots">
                             {stage === "planning" ? (
                               <div className="planning-emblem">
-                                <span className="sr-only" role="status">Değerlendirme başlatılıyor.</span>
+                                <span className="sr-only" role="status">{t("Değerlendirme başlatılıyor.")}</span>
                                 <PlanningCrew />
                               </div>
                             ) : (
                               <div className="evaluation-progress" data-judging={stage === "judging"}>
                                 <span className="sr-only" role="status">{stage === "judging"
-                                  ? "Ortak karar hazırlanıyor."
-                                  : `${completedCount} / ${agents.length} uzman tamamlandı.`}</span>
+                                  ? t("Ortak karar hazırlanıyor.")
+                                  : t("{completed} / {total} uzman tamamlandı.", { completed: completedCount, total: agents.length })}</span>
                                 {renderProgressRobots()}
                               </div>
                             )}
@@ -1532,20 +1678,25 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
                 </>
               )}
             </AnimatedAnswer>
-            {stage === "cancelled" && <p className="evaluation-notice" role="status">Değerlendirme durduruldu.</p>}
-            {error && <p className="evaluation-notice evaluation-error" role="alert">{error}</p>}
+            {stage === "cancelled" && <p className="evaluation-notice" role="status">{t("Değerlendirme durduruldu.")}</p>}
+            {error && <p className="evaluation-notice evaluation-error" role="alert">{t(error)}</p>}
 
           </article>
           </div>
-          <div className="thread-composer question-card" data-busy={isBusy} onKeyDown={handleComposerKeyDown}>
+          {demo && result && activeRecord?.question === demo.followUps.at(-1)?.question ? (
+            <div className="thread-composer question-card demo-install">
+              <p>{t("Demoyu beğendiyseniz Ortak Akıl’ı bilgisayarınıza kurup kendi dosyalarınızla kendi sorularınızı sorabilirsiniz.")}</p>
+              <a className="text-button" href={demo.installationUrl} target="_blank" rel="noreferrer">{t("Kurulum rehberini aç")}</a>
+            </div>
+          ) : <div className="thread-composer question-card" data-busy={isBusy} onKeyDown={handleComposerKeyDown}>
             <form id="follow-up-form" className="composer-form" onSubmit={event => {
               event.preventDefault();
               if (activeRecord?.result && !isBusy) void submitEvaluation(activeRecord);
             }}>
               {attachmentCard}
-              {!isBusy && <textarea rows={1} readOnly={!!demo} disabled={!result} aria-label="Takip sorusu" placeholder="Bu değerlendirme hakkında soru sor"
+              {!isBusy && <textarea rows={1} readOnly={!!demo} disabled={!result} aria-label={t("Takip sorusu")} placeholder={t("Bu değerlendirme hakkında soru sor")}
                 onPointerDown={closeComposerPanels} onFocus={closeComposerPanels}
-                value={followUpQuestion} onChange={event => setFollowUpQuestion(event.target.value)}
+                value={showQuestionText(followUpQuestion)} onChange={event => setFollowUpQuestion(event.target.value)}
                 onKeyDown={event => {
                   if (event.key !== "Enter" || event.shiftKey || event.altKey || event.nativeEvent.isComposing) return;
                   event.preventDefault();
@@ -1555,16 +1706,16 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
                 {result && !isBusy && composerTools}
                 <button type={isBusy ? "button" : "submit"} className="primary-button symbol-send"
                   data-running={isBusy} data-spinning={isBusy}
-                  aria-label={isBusy ? "Değerlendirmeyi durdur" : "Takip sorusunu gönder"}
-                  title={isBusy ? "Durdur" : undefined}
+                  aria-label={isBusy ? t("Değerlendirmeyi durdur") : t("Takip sorusunu gönder")}
+                  title={isBusy ? t("Durdur") : undefined}
                   onClick={isBusy ? () => evaluation.current?.abort() : undefined}
                   disabled={!isBusy && (!result || (!followUpQuestion.trim() && !hasAttachment) || !openaiModel.trim() || savingDocs || attachmentBlocked)}>
-                  <SendSymbol />
+                  <SendSymbol demo={!!demo} />
                 </button>
               </div>
             </form>
             {composerPanels}
-          </div>
+          </div>}
         </section>
       )}
 
@@ -1582,15 +1733,12 @@ export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?:
           <header className="diagram-dialog-header">
             <h2 id="diagram-title">{diagramTitle}</h2>
             <div className="diagram-dialog-actions">
-              <button className="diagram-action" type="button" aria-label="SVG indir" title="SVG indir"
+              <button className="diagram-action" type="button" aria-label={t("SVG indir")} title={t("SVG indir")}
                 onClick={() => downloadSolutionDiagram(diagramSvg)}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
-                  strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4" />
-                </svg>
+                <DownloadIcon />
               </button>
               <form method="dialog">
-                <button className="diagram-action diagram-close" type="submit" aria-label="Kapat" title="Kapat">×</button>
+                <button className="diagram-action diagram-close" type="submit" aria-label={t("Kapat")} title={t("Kapat")}>×</button>
               </form>
             </div>
           </header>
