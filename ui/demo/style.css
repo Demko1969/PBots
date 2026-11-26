@@ -1,35 +1,5 @@
 .demo-robot-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 
-.demo-send-symbol::before,
-.demo-send-symbol::after { display: none; }
-.demo-send-symbol svg { display: block; inline-size: 100%; block-size: 100%; overflow: visible; }
-.demo-send-outline { fill: none; stroke: currentColor; }
-.demo-send-fill { fill: currentColor; clip-path: circle(0%) view-box; }
-.symbol-send:enabled:is(:hover, :focus-visible) .demo-send-fill,
-.symbol-send[data-running="true"] .demo-send-fill { clip-path: circle(75%) view-box; }
-.demo-send-center { color: #16834f; }
-.symbol-send[data-running="true"]:enabled:is(:hover, :focus-visible) .demo-send-center { color: inherit; }
-.demo-send-rotor { transform-box: view-box; transform-origin: 50% 60%; }
-.demo-send-blade.send-symbol-blade-top { --blade-offset: -4px, -6px; }
-.demo-send-blade.send-symbol-blade-right { --blade-offset: 7px, 2px; }
-.demo-send-blade.send-symbol-blade-bottom { --blade-offset: -4px, 6px; }
-@media (prefers-reduced-motion: no-preference) {
-  .demo-send-fill { transition: clip-path 340ms ease-in-out; }
-  .symbol-send[data-spinning="true"] .send-symbol.demo-send-symbol { animation: none; }
-  .symbol-send[data-spinning="true"] .demo-send-rotor { animation: demo-send-turn 1.82s ease-in-out infinite; }
-  .symbol-send[data-spinning="true"] .demo-send-blade { animation: demo-send-open 1.82s ease-in-out infinite; }
-  .symbol-send[data-spinning="true"] .demo-send-fill { animation: send-symbol-fill 1.82s linear infinite; }
-
-  @keyframes demo-send-turn {
-    from, 10% { transform: rotate(0turn); }
-    36%, to { transform: rotate(1turn); }
-  }
-  @keyframes demo-send-open {
-    from, 46%, to { transform: translate(0, 0); }
-    10%, 36% { transform: translate(var(--blade-offset)); }
-  }
-}
-
 .demo-model-value { color: var(--ink); font-weight: 650; }
 .demo-csv-header { display: flex; align-items: center; gap: .5rem; }
 .demo-csv-header p { margin: 0; }
@@ -45,37 +15,9 @@
   border-radius: 50%;
 }
 .demo-csv-download:is(:hover, :focus-visible) { background: var(--blue-soft); }
-.demo-ticket-preview { display: block; max-inline-size: 100%; block-size: auto; border-radius: 12px; }
 .demo-install { display: flex; flex-direction: column; align-items: center; gap: .5rem; padding: 1rem; text-align: center; }
 .demo-install p { margin: 0; }
 .demo-install a { font-weight: 650; text-decoration: underline; }
 
-.demo-image-trigger { align-self: flex-end; inline-size: min(9rem, 80%); margin-block-end: 6px; padding: 0; border: 0; border-radius: 9px; background: transparent; cursor: pointer; }
-.demo-image-trigger .thread-question-image { display: block; inline-size: 100%; max-inline-size: none; block-size: auto; margin: 0; }
-.demo-image-dialog { width: min(672px, calc(100vw - 2rem)); }
-.demo-image-close { display: grid; margin: 4px 6px 4px auto; }
-.demo-image-dialog > img { display: block; inline-size: 100%; block-size: auto; }
-@media (prefers-reduced-motion: no-preference) {
-  .demo-image-dialog[open][data-closing] { animation: demo-image-dismiss var(--popup-duration) var(--popup-easing) both; }
-  .demo-image-dialog[open][data-closing]::backdrop { animation: backdrop-reveal var(--popup-duration) ease-out reverse both; }
-  @keyframes demo-image-dismiss { to { opacity: 0; translate: 0 6px; } }
-}
-
 [data-demo="true"] .workspace { flex: 1; }
 [data-demo="true"] .thread-scroll { flex: 1; animation: none; }
-
-.demo-progress-row {
-  position: relative;
-  padding-inline-start: 36px;
-}
-.demo-progress-row .planning-crew,
-.demo-progress-row .robot-row { gap: 6px; }
-.demo-progress-row .robot-row { position: static; justify-content: flex-start; }
-.demo-progress-row .demo-progress-return { position: absolute; inset: 0 auto auto 0; margin: 0; }
-.demo-progress-row .judging-thoughts { display: block; }
-.demo-progress-row .thinking-bubble {
-  position: absolute;
-  inset-block-start: calc(100% + 20px);
-  inset-inline-start: 50%;
-  translate: -50% 0;
-}

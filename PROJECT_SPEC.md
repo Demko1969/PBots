@@ -7,6 +7,12 @@
 3. Judge combines the Worker answers using the OpenAI Responses API and returns a final answer and, when appropriate, a solution diagram.
 4. The UI shows the result and can optionally export a report to Google Docs.
 
+## Chat presentation
+
+The live web app and browser demo place the Planner and Expert loading animations under the current question. In the live app, the Planner determines the expert roles for each evaluation, and users can open an expert’s view during the run. Both surfaces use the same send button, which spins while an evaluation can be stopped and uses a static busy indicator with reduced motion.
+
+In the live app, the attachment card and attachment menu can open JPG and PNG previews before sending. The submitted image appears above its question in the chat and can be enlarged during and after the evaluation. The original is available in the current page session. History stores a thumbnail, which the viewer can enlarge after reloading the page.
+
 ## Language
 
 The main web app and the public browser demo support English, French, and Turkish. The UI uses the browser’s preferred supported language on first visit and falls back to English. A manual selection is stored locally.
