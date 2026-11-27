@@ -2,7 +2,7 @@
 
 import { ATTACHMENT_ACCEPT, MAX_ATTACHMENT_BYTES, attachmentType, createAttachmentThumbnail, isAttachmentThumbnail, matchesAttachmentSignature } from "../lib/attachments";
 import { splitExpertAnswer } from "../lib/expert-answer";
-import { isDiscussionExpert, runEvaluation, sha256, shortAnswer, type Agent, type AgentStatus, type JudgeResult, type SavedRun } from "../lib/evaluation-run";
+import { isDiscussionExpert, runEvaluation, sha256, shortAnswer, type Agent, type AgentStatus, type JudgeResult, type ProviderId, type SavedRun } from "../lib/evaluation-run";
 import { downloadSolutionDiagram, renderSolutionDiagram, type SolutionFlow } from "../lib/diagram";
 import { conversationBefore } from "../lib/conversation";
 import { canShowStoredDiagram } from "../lib/judge-review";
@@ -11,6 +11,7 @@ import Image from "next/image";
 import { appRequest, brandLogo, robotSprite, isDemoTransport } from "../lib/app-request";
 import Setup, { type SetupStatus } from "../components/Setup";
 import { isTablePreview, MAX_CSV_BYTES, parseCsv, profileTable, tablePreviewFromContext, type TablePreview } from "../lib/table";
+import { isProvider, providers } from "../lib/provider-catalog.mjs";
 import { type Language } from "../lib/language";
 import { LanguageSelect, setupGuide, useMessages, WorkspaceLanguage } from "../lib/workspace-language";
 import { Fragment, type DragEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -27,7 +28,7 @@ export type DemoScenario = {
     tableLabel: (value: string) => string;
   };
   download: string;
-  model: { id: string; label: string };
+  model: { id: string };
   expertCount: (question: string) => number;
   installationUrl: string;
   csv: { name: string; text: string };
@@ -78,13 +79,24 @@ function googleDocumentUrl(value: unknown) {
       url.pathname.startsWith("/document/")) return url.href;
 }
 
-// Selection guidance checked against https://developers.openai.com/api/docs/models on 2026-11-08.
-const modelOptions = [
-  { id: "gpt-6-astra", label: "GPT-6 Astra · En güçlü analiz" },
-  { id: "gpt-6.1-sol", label: "GPT-6.1 Sol · Dengeli" },
-  { id: "gpt-6.1-terra", label: "GPT-6.1 Terra · Hızlı" },
-  { id: "gpt-6-luna", label: "GPT-6 Luna · Ekonomik" },
-];
+const demoModelLabel = "Seçili AI sağlayıcısı ve model";
+const themeChoices = {
+  default: "PBots Default",
+  openai: "OpenAI",
+  claude: "Claude",
+  gemini: "Gemini",
+  follow: "Modeli izle",
+} as const;
+type Theme = keyof typeof themeChoices;
+
+function isTheme(value: string): value is Theme {
+  return Object.hasOwn(themeChoices, value);
+}
+
+function savedModel(run: SavedRun) {
+  const model = run.model || run.result?.openaiModel || run.result?.model || run.plan?.openaiModel || run.plan?.model;
+  return model ? `${providers[run.provider ?? "openai"]?.name ?? "OpenAI"} · ${model}` : undefined;
+}
 
 async function postStage<T>(stage: string, payload: unknown, signal?: AbortSignal): Promise<T> {
   signal?.throwIfAborted();
@@ -394,8 +406,9 @@ function ThreadQuestion({ question, thumbnail, table, imageUrl, demoImageUrl, ta
   </>;
 }
 
-function ThreadTurn({ run, result, exports, imageUrl, demoImageUrl, tableLabel }: {
-  run: SavedRun; result: JudgeResult; exports: ReactNode; imageUrl?: string; demoImageUrl?: string; tableLabel?: (value: string) => string;
+function ThreadTurn({ run, result, exports, imageUrl, demoImageUrl, tableLabel, modelLabel }: {
+  run: SavedRun;
+  modelLabel: string; result: JudgeResult; exports: ReactNode; imageUrl?: string; demoImageUrl?: string; tableLabel?: (value: string) => string;
 }) {
   const { t } = useMessages();
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -405,6 +418,7 @@ function ThreadTurn({ run, result, exports, imageUrl, demoImageUrl, tableLabel }
   return (
     <article className="thread-entry">
       <div className="thread-turn-header">
+        <small className="thread-model">{modelLabel}</small>
         <ThreadQuestion question={run.question} thumbnail={run.imageThumbnail} table={savedTablePreview(run)} imageUrl={imageUrl} demoImageUrl={demoImageUrl} tableLabel={tableLabel} />
         <div className="result-toolbar">
           {experts.length > 0 && <div className="result-experts" role="group" aria-label={t("Bu sorunun uzman görüşleri")}>
@@ -721,10 +735,12 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
   const hasAttachment = !!(media || csvSource);
   const attachmentName = media?.file.name ?? csvSource?.name;
   const attachmentBlocked = readingCsv || !!csvError || !!csv.error;
-  const [modelChoice, setModelChoice] = useState("default");
-  const [customModel, setCustomModel] = useState("");
-  const defaultModel = setup?.defaultModel || "gpt-5-mini";
-  const openaiModel = demo?.model.id ?? (modelChoice === "custom" ? customModel : modelChoice === "default" ? defaultModel : modelChoice);
+  const [providerChoice, setProviderChoice] = useState<ProviderId>();
+  const [appearance, setAppearance] = useState<Theme>("default");
+  const configuredProviders = setup?.providers?.filter(option => option.configured) ?? [];
+  const nextProvider = configuredProviders.find(option => option.id === (providerChoice ?? setup?.defaultProvider)) ?? configuredProviders[0];
+  const theme = appearance === "follow" ? demo ? "default" : nextProvider?.id ?? "default" : appearance;
+  const failedAttempt = useRef<{ question: string; parentId?: string; provider: ProviderId; model: string } | undefined>(undefined);
   const [stage, setStage] = useState<Stage>("idle");
   const isBusy = ["planning", "working", "judging"].includes(stage);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -741,9 +757,6 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
   const historyOpenVersion = useRef(0);
   const historyListVersion = useRef(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
-  const modelTrigger = useRef<HTMLButtonElement>(null);
-  const modelChoices = useRef<HTMLDivElement>(null);
   const [csvOpen, setCsvOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -798,40 +811,15 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
     if (searchOpen && historyOpen) historySearchField.current?.focus({ preventScroll: true });
   }, [searchOpen, historyOpen]);
 
-  useLayoutEffect(() => {
-    const trigger = modelTrigger.current;
-    const choices = modelChoices.current;
-    if (!trigger || !choices) return;
-    if (!settingsOpen || !modelPickerOpen || isBusy) {
-      if (choices.matches(":popover-open")) choices.hidePopover();
-      return;
-    }
-
-    function positionChoices() {
-      if (!trigger || !choices) return;
-      const anchor = trigger.getBoundingClientRect();
-      const gap = 6;
-      const viewportInset = 8;
-      const availableBelow = window.innerHeight - anchor.bottom - gap - viewportInset;
-      const availableAbove = anchor.top - gap - viewportInset;
-      const openAbove = availableBelow < choices.scrollHeight && availableAbove > availableBelow;
-      choices.style.left = `${anchor.left}px`;
-      choices.style.width = `${anchor.width}px`;
-      choices.style.maxHeight = `${Math.max(0, openAbove ? availableAbove : availableBelow)}px`;
-      choices.style.top = openAbove ? "auto" : `${anchor.bottom + gap}px`;
-      choices.style.bottom = openAbove ? `${window.innerHeight - anchor.top + gap}px` : "auto";
-    }
-
-    choices.showPopover();
-    positionChoices();
-    window.addEventListener("resize", positionChoices);
-    window.addEventListener("scroll", positionChoices, true);
-    return () => {
-      window.removeEventListener("resize", positionChoices);
-      window.removeEventListener("scroll", positionChoices, true);
-      if (choices.matches(":popover-open")) choices.hidePopover();
-    };
-  }, [settingsOpen, modelPickerOpen, isBusy]);
+  useEffect(() => {
+    const restore = window.setTimeout(() => {
+      try {
+        const stored = localStorage.getItem("pbots.appearance");
+        if (stored && isTheme(stored)) setAppearance(stored);
+      } catch { /* The current theme still works without browser storage. */ }
+    }, 0);
+    return () => window.clearTimeout(restore);
+  }, []);
 
   useEffect(() => {
     const settings = document.getElementById("evaluation-settings");
@@ -844,14 +832,11 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
       const target = event.target;
       if (!(target instanceof Element)) return;
 
-      if (settingsOpen && !target.closest('#evaluation-settings, #model-choices, [aria-controls="evaluation-settings"]')) {
+      if (settingsOpen && !target.closest('#evaluation-settings, [aria-controls="evaluation-settings"]')) {
         setSettingsOpen(false);
       }
       if (csvOpen && !target.closest('#csv-panel, [aria-controls="csv-panel"]')) {
         setCsvOpen(false);
-      }
-      if (modelPickerOpen && !target.closest(".model-picker")) {
-        setModelPickerOpen(false);
       }
       if (searchOpen && !target.closest('.run-history')) {
         setSearchOpen(false);
@@ -861,7 +846,7 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
 
     document.addEventListener("click", dismissOutside, true);
     return () => document.removeEventListener("click", dismissOutside, true);
-  }, [settingsOpen, csvOpen, searchOpen, modelPickerOpen]);
+  }, [settingsOpen, csvOpen, searchOpen]);
 
   function showQuestion(focus = true) {
     historyOpenVersion.current++;
@@ -934,9 +919,12 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
       if (version !== historyOpenVersion.current || submitting.current) return;
       const completed = runs.findLast(run => run.result);
       if (!completed) {
-        await refreshHistory();
+        const pending = runs.at(-1);
+        if (pending && !demo) void resumeEvaluation(pending, runs);
         return;
       }
+      setProviderChoice(undefined);
+      failedAttempt.current = undefined;
       if (!demo) void followUpAttachment.loadAttachment(undefined);
       openSaved(completed, runs);
     } catch {
@@ -1056,31 +1044,47 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
     presentation?.diagram(diagram.question, diagram.flow) ?? diagram.flow,
   ) : "";
 
-  async function submitEvaluation(followUp?: SavedRun) {
-    const draft = followUp ? followUpQuestion : question;
+  function resumeEvaluation(run: SavedRun, entries: SavedRun[]) {
+    const prior = earlierTurns(run, entries);
+    return submitEvaluation(prior.at(-1), { run, prior });
+  }
+
+  async function submitEvaluation(followUp?: SavedRun, saved?: { run: SavedRun; prior: SavedRun[] }) {
+    const draft = saved?.run.question ?? (followUp ? followUpQuestion : question);
     const cleanQuestion = draft.trim() || (hasAttachment ? t("Ekli dosyayı incele.") : "");
-    const model = openaiModel.trim();
-    if (!cleanQuestion || !model || submitting.current || savingDocs) return;
-    if (attachmentBlocked) return;
+    const provider = saved?.run.provider ?? (saved || demo ? "openai" : nextProvider?.id);
+    const model = saved ? saved.run.model || saved.run.plan?.openaiModel || saved.run.plan?.model || providers.openai.model
+      : demo?.model.id ?? nextProvider?.model;
+    if (!cleanQuestion || submitting.current || savingDocs) return;
+    if (!provider || !model) {
+      if (followUp) setError("Ayarlarda bir AI sağlayıcısı yapılandırın.");
+      else setQuestionError("Ayarlarda bir AI sağlayıcısı yapılandırın.");
+      return;
+    }
+    if (!saved && attachmentBlocked) return;
+    if (!saved && !demo) setProviderChoice(current => current ?? provider);
 
     const isNewQuestion = !followUp;
+    const failure = failedAttempt.current;
+    const restart = !saved && failure?.question === cleanQuestion && failure.parentId === followUp?.id &&
+      (failure.provider !== provider || failure.model !== model);
     if (demo && isNewQuestion) demoAttempt.current ??= crypto.randomUUID();
     if (isNewQuestion) setQuestionError("");
     historyOpenVersion.current++;
     setOpeningHistory(false);
-    const prior = followUp ? [...previousTurns, followUp] : [];
+    const prior = saved?.prior ?? (followUp ? [...previousTurns, followUp] : []);
     submitting.current = true;
     if (followUp) setFollowUpQuestion("");
     const controller = new AbortController();
     evaluation.current = controller;
     const { signal } = controller;
-    const imageFile = !demo && media?.mime.startsWith("image/") ? media.file : undefined;
+    const imageFile = !demo && !saved && media?.mime.startsWith("image/") ? media.file : undefined;
     let imageUrl: string | undefined;
     try {
       if (imageFile) imageUrl = URL.createObjectURL(imageFile);
       const { kind, run } = await runEvaluation({
-        question: cleanQuestion, model, followUp, previousTurns, csvSource, table: csv.table,
-        media, requestScope: demo && isNewQuestion ? demoAttempt.current : undefined,
+        question: cleanQuestion, model, provider, resume: saved?.run, restart, followUp, previousTurns: prior.slice(0, -1),
+        csvSource: saved ? null : csvSource, table: saved ? null : csv.table, media: saved ? null : media, requestScope: demo && isNewQuestion ? demoAttempt.current : undefined,
         fallbackLanguage: demo ? undefined : language, setupBlocked, signal,
       }, {
         postStage,
@@ -1126,6 +1130,7 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
         setSentImages(new Map(sessionImages.current));
         imageUrl = undefined;
       }
+      failedAttempt.current = undefined;
       openSaved(run, prior, kind === "evaluated" ? "preserve" : "bottom");
       if (isNewQuestion) {
         setQuestion(demo?.question ?? "");
@@ -1135,6 +1140,8 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
       }
       if (!demo && kind !== "direct") void followUpAttachment.loadAttachment(undefined);
     } catch (runError) {
+      if (!signal.aborted) failedAttempt.current = { question: cleanQuestion, parentId: followUp?.id, provider, model };
+      if (saved && !followUp) setQuestion(draft);
       if (followUp) {
         openSaved(followUp, prior);
         setFollowUpQuestion(draft);
@@ -1226,18 +1233,12 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
             </div>;
 
   function closeComposerPanels() {
-    setModelPickerOpen(false);
     setSettingsOpen(false);
     setCsvOpen(false);
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key !== "Escape" || (!settingsOpen && !csvOpen)) return;
-    if (modelPickerOpen) {
-      setModelPickerOpen(false);
-      modelTrigger.current?.focus();
-      return;
-    }
     const disclosure = (event.target as Element).closest<HTMLDetailsElement>("details[open]");
     if (disclosure) {
       disclosure.open = false;
@@ -1253,7 +1254,6 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
   function attachFile(file: File | undefined) {
     if (!file || !canAttach) return;
     setSettingsOpen(false);
-    setModelPickerOpen(false);
     setCsvOpen(attachmentType(file.name) === "text/csv");
     void loadAttachment(file);
   }
@@ -1303,12 +1303,12 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
     <>
       <button type="button" className="settings-toggle text-button" aria-label={t("Ayarlar")} title={t("Ayarlar")}
         aria-expanded={settingsOpen} aria-controls="evaluation-settings"
-        onClick={() => { setModelPickerOpen(false); setCsvOpen(false); setSettingsOpen(open => !open); }}>
+        onClick={() => { setCsvOpen(false); setSettingsOpen(open => !open); }}>
         <span className="settings-sliders" aria-hidden="true"><i /><i /><i /></span>
       </button>
       <button type="button" className={`settings-toggle text-button${!demo && hasAttachment ? " csv-attached" : ""}`} title={displayAttachmentName ?? t("Dosya ekle")}
         aria-label={t("Dosya ekle")}
-        aria-expanded={csvOpen} aria-controls="csv-panel" onClick={() => { setModelPickerOpen(false); setSettingsOpen(false); setCsvOpen(open => !open); }}>
+        aria-expanded={csvOpen} aria-controls="csv-panel" onClick={() => { setSettingsOpen(false); setCsvOpen(open => !open); }}>
         <span aria-hidden="true">+</span>
       </button>
     </>
@@ -1316,7 +1316,16 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
 
   const panelTable = demo && !demoImage ? questionAttachment.csv.table : csv.table;
   const tableSummary = panelTable && <p><b>{panelTable.name}</b> · {t("{total} satır", { total: panelTable.rows.length })} · {t("{total} sütun", { total: panelTable.columns.length })}</p>;
-  const defaultLabel = t("Varsayılan · {model}", { model: defaultModel === "gpt-5-mini" ? "GPT-5 mini" : defaultModel });
+  const composerModel = demo
+    ? <span className="composer-model-label">{t(demoModelLabel)}</span>
+    : <select className="composer-model" aria-label={t("Sonraki soru için sağlayıcı ve model")}
+        value={nextProvider?.id ?? ""} disabled={!configuredProviders.length}
+        onChange={event => { if (isProvider(event.target.value)) setProviderChoice(event.target.value); }}>
+        {!configuredProviders.length && <option value="">{t("Sağlayıcı seçin")}</option>}
+        {configuredProviders.map(option => <option key={option.id} value={option.id}>{option.name} · {option.label}</option>)}
+      </select>;
+  const modelMetadata = (run: SavedRun) => demo ? t(demoModelLabel)
+    : run.localAnswer ? t("Yerel kısa yanıt") : savedModel(run) ?? t("Model bilgisi yok");
   const composerPanels = (
     <>
     <div id="csv-panel" className="composer-panel csv-input" data-table={!!panelTable}
@@ -1365,41 +1374,16 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
       data-open={settingsOpen} inert={!settingsOpen} aria-labelledby="evaluation-settings-title">
     <h2 className="composer-panel-title" id="evaluation-settings-title">{t("Ayarlar")}</h2>
     <div className="model-field">
-      <span id="model-label">{t("Kullanılacak model")}</span>
-      {demo ? (
-        <span className="demo-model-value">{demo.model.label}</span>
-      ) : (
-        <>
-          <div className="model-picker">
-            <button ref={modelTrigger} id="openai-model" type="button" disabled={isBusy}
-              aria-labelledby="model-label model-selection" aria-controls="model-choices" aria-expanded={modelPickerOpen}
-              onClick={() => setModelPickerOpen(open => !open)}>
-              <span id="model-selection">{modelChoice === "default"
-                ? defaultLabel
-                : t(modelOptions.find(model => model.id === modelChoice)?.label ?? "Başka bir model kullan")}</span>
-            </button>
-            <div ref={modelChoices} id="model-choices" className="model-choices" popover="manual">
-              {[
-                { id: "default", label: defaultLabel },
-                ...modelOptions,
-                { id: "custom", label: t("Başka bir model kullan") },
-              ].map(model => (
-                <button type="button" key={model.id} data-model={model.id} aria-pressed={modelChoice === model.id} onClick={() => {
-                  setModelChoice(model.id);
-                  setModelPickerOpen(false);
-                  modelTrigger.current?.focus();
-                }}>{t(model.label)}</button>
-              ))}
-            </div>
-          </div>
-          {modelChoice === "custom" && <>
-            <label htmlFor="custom-model">{t("Model kimliği")}</label>
-            <input id="custom-model" form={showWorkspace ? "follow-up-form" : "evaluation-form"} value={customModel} onChange={event => setCustomModel(event.target.value)}
-              placeholder={t("Hesabınızdaki model kimliğini girin")} disabled={isBusy} required
-              autoComplete="off" spellCheck={false} />
-          </>}
-        </>
-      )}
+      <label htmlFor="appearance-theme">{t("Görünüm")}</label>
+      <select id="appearance-theme" value={appearance} onChange={event => {
+        const value = event.target.value;
+        if (!isTheme(value)) return;
+        setAppearance(value);
+        try { localStorage.setItem("pbots.appearance", value); } catch { /* Appearance is still applied. */ }
+      }}>
+        {Object.entries(themeChoices).map(([id, label]) => <option key={id} value={id}>{t(label)}</option>)}
+      </select>
+      {demo && <small>{t(demoModelLabel)}</small>}
     </div>
     {!demo && <Setup onStatus={setSetup} />}
     {historyGroups.length > 0 && <HistoryDisclosure className="history-management" summary={<h2>{t("Değerlendirme kayıtları")}</h2>}>
@@ -1414,8 +1398,10 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
               {runs.map(run => <li className="history-entry" key={run.id}>
                 <div className="history-record-meta">
                   <span>{showQuestionText(run.question)}</span>
-                  <small>{run.model} · {new Date(historyTime(run)).toLocaleString(language)}</small>
+                  <small>{modelMetadata(run)} · {new Date(historyTime(run)).toLocaleString(language)}</small>
                 </div>
+                {!demo && !run.result && <button type="button" className="text-button" disabled={isBusy || savingDocs}
+                  onClick={() => void resumeEvaluation(run, runs)}>{t("Değerlendirmeye devam et")}</button>}
                 {run.followUpPrompt && <button type="button" className="history-delete" disabled={isBusy || savingDocs || deletingHistory}
                   aria-label={t("Takip sorusunu sil")} title={t("Takip sorusunu sil")}
                   onClick={event => void deleteHistory({ action: "delete", id: run.id }, event.currentTarget.closest("li"))}>×</button>}
@@ -1433,7 +1419,7 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
   );
 
   return (
-    <main className="app-shell" data-demo={!!demo}
+    <main className="app-shell" data-demo={!!demo} data-theme={theme}
       onKeyDown={event => {
         if (event.key !== "Escape" || !historyOpen || !(event.target instanceof Element) ||
             !event.target.closest(".run-history")) return;
@@ -1485,6 +1471,8 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
                   historyOpenVersion.current++;
                   setOpeningHistory(false);
                   demoAttempt.current = undefined;
+                  setProviderChoice(undefined);
+                  failedAttempt.current = undefined;
                   setFollowUpQuestion("");
                   void followUpAttachment.loadAttachment(undefined);
                   setSettingsOpen(false);
@@ -1517,10 +1505,11 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
             <ul className="history-list" aria-busy={openingHistory}>
               {visibleHistory.map(group => (
                 <li className="history-group" key={group.key}>
-                  {group.completed ? <button type="button" className="history-question text-button" title={showQuestionText(group.question)}
+                  {group.completed || !demo ? <button type="button" className="history-question text-button" title={showQuestionText(group.question)}
                     aria-current={group.key === activeHistoryKey ? "true" : undefined}
                     disabled={isBusy || savingDocs || group.key === activeHistoryKey} onClick={() => void openHistoryGroup(group.key)}>
                     {showQuestionText(group.question)}
+                    {!group.completed && <span className="sr-only"> · {t("Değerlendirmeye devam et")}</span>}
                   </button> : <span className="history-question">{showQuestionText(group.question)}</span>}
                 </li>
               ))}
@@ -1566,7 +1555,8 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
           />
           <div className="composer-tools">
             {composerTools}
-            <button className="primary-button symbol-send" type="submit" data-running={isBusy} aria-busy={isBusy} aria-label={t("Uzmanları çalıştır")} title={t("Uzmanları çalıştır")} disabled={(!question.trim() && !hasAttachment) || !openaiModel.trim() || isBusy || savingDocs || attachmentBlocked}>
+            {composerModel}
+            <button className="primary-button symbol-send" type="submit" data-running={isBusy} aria-busy={isBusy} aria-label={t("Uzmanları çalıştır")} title={t("Uzmanları çalıştır")} disabled={(!question.trim() && !hasAttachment) || isBusy || savingDocs || attachmentBlocked}>
               <SendSymbol />
             </button>
           </div>
@@ -1584,9 +1574,10 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
           {previousTurns.map(run => run.result && <ThreadTurn key={`${scrollRequest}:${run.id}`}
             run={{ ...run, question: showQuestionText(run.question) }} result={presentation?.result(run.question, run.result) ?? run.result}
             exports={resultExports(run)} imageUrl={sentImages.get(run.id)}
-            demoImageUrl={presentation?.imageUrl(run.question)} tableLabel={presentation?.tableLabel} />)}
+            demoImageUrl={presentation?.imageUrl(run.question)} tableLabel={presentation?.tableLabel} modelLabel={modelMetadata(run)} />)}
           <article ref={currentTurn} className={isBusy ? "result-panel result-panel-running" : "result-panel"}>
             <div className="thread-turn-header">
+              {activeRecord && <small className="thread-model">{modelMetadata(activeRecord)}</small>}
               {displayQuestion && <ThreadQuestion question={showQuestionText(displayQuestion)} thumbnail={displayThumbnail}
                 table={displayTable} imageUrl={displayImageUrl} demoImageUrl={presentation?.imageUrl(displayQuestion)} tableLabel={presentation?.tableLabel} />}
             </div>
@@ -1632,6 +1623,8 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
             <div className="thread-composer question-card demo-install">
               <p>{t("Demoyu beğendiyseniz Ortak Akıl’ı bilgisayarınıza kurup kendi dosyalarınızla kendi sorularınızı sorabilirsiniz.")}</p>
               <a className="text-button" href={demo.installationUrl} target="_blank" rel="noreferrer">{t("Kurulum rehberini aç")}</a>
+              <div className="composer-tools">{composerTools}{composerModel}</div>
+              {composerPanels}
             </div>
           ) : <div className="thread-composer question-card" data-busy={isBusy} onKeyDown={handleComposerKeyDown}>
             <form id="follow-up-form" className="composer-form" onSubmit={event => {
@@ -1648,13 +1641,14 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
                   if ((followUpQuestion.trim() || hasAttachment) && !savingDocs) event.currentTarget.form?.requestSubmit();
                 }} />}
               <div className="composer-tools">
-                {result && !isBusy && composerTools}
+                {composerTools}
+                {composerModel}
                 <button type={isBusy ? "button" : "submit"} className="primary-button symbol-send"
                   data-running={isBusy} data-spinning={isBusy}
                   aria-label={isBusy ? t("Değerlendirmeyi durdur") : t("Takip sorusunu gönder")}
                   title={isBusy ? t("Durdur") : undefined}
                   onClick={isBusy ? () => evaluation.current?.abort() : undefined}
-                  disabled={!isBusy && (!result || (!followUpQuestion.trim() && !hasAttachment) || !openaiModel.trim() || savingDocs || attachmentBlocked)}>
+                  disabled={!isBusy && (!result || (!followUpQuestion.trim() && !hasAttachment) || savingDocs || attachmentBlocked)}>
                   <SendSymbol />
                 </button>
               </div>

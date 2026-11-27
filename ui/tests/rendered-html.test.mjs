@@ -30,13 +30,12 @@ test("server-renders the multi-agent workspace", async () => {
   assert.match(html, /<aside[^>]+aria-labelledby="history-title"/);
   assert.ok(html.indexOf("Run the experts") < html.indexOf("id=\"evaluation-settings\""));
   assert.match(html, /Run the experts/);
-  assert.match(html, /<button[^>]+id="openai-model"[^>]+aria-controls="model-choices"/);
-  assert.match(html, /<div[^>]+id="model-choices"[^>]+popover="manual"/);
-  assert.match(html, /Use a different model/);
+  assert.match(html, /<select[^>]+aria-label="Provider and model for the next question"/);
+  assert.match(html, /<select[^>]+id="appearance-theme"/);
+  for (const theme of ["PBots Default", "OpenAI", "Claude", "Gemini", "Follow model"]) {
+    assert.match(html, new RegExp(`>${theme}</option>`));
+  }
   assert.doesNotMatch(html, /datalist|csv-delimiter|<footer|UTF-8 ·/);
-  assert.ok(html.indexOf('data-model="gpt-6-astra"') < html.indexOf('data-model="gpt-6.1-sol"'));
-  assert.ok(html.indexOf('data-model="gpt-6.1-sol"') < html.indexOf('data-model="gpt-6.1-terra"'));
-  assert.ok(html.indexOf('data-model="gpt-6.1-terra"') < html.indexOf('data-model="gpt-6-luna"'));
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
 

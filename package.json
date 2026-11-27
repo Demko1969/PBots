@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "validate": "node scripts/validate-workflows.mjs && node scripts/test-contracts.mjs && node scripts/test-google-docs-formatting.mjs",
+    "validate": "node scripts/validate-workflows.mjs && node scripts/test-contracts.mjs && node scripts/test-google-docs-formatting.mjs && node --test deployment/*.test.mjs",
     "demo:build": "ui/node_modules/.bin/vite build --config ui/demo/vite.config.mjs"
   }
 }

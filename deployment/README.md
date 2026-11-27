@@ -10,20 +10,21 @@ different boundaries. Neither provides separate user accounts for UI history.
    containers and run `scripts/start.cmd`. On macOS or Linux run
    `bash scripts/start.sh` from the checkout.
 2. Open the [local UI](http://localhost:3000). Follow the setup link and create
-   the n8n owner account. Return to the UI and enter your OpenAI API key in
+   the n8n owner account. Return to the UI, choose an AI provider, and enter its API key in
    Settings. Use the language selector in the top bar to switch between
    English, French, and Turkish.
 3. Setup creates a separate random webhook token, imports eight workflows and
    publishes the three analysis webhooks and their three sub-workflows. Run the
-   example question to verify model access. Setup's key check reads the model
-   list. Actual evaluations use paid API calls.
+   example question to verify the complete evaluation. Setup and **Test
+   connection** send a small request to the exact model. Connection checks and
+   evaluations use the selected provider's API quota.
 
-The launcher ignores a root `.env`. Override the ports or model using shell
+The launcher ignores a root `.env`. Override the ports using shell
 environment variables, for example `APP_PORT=3001 bash scripts/start.sh`.
 The n8n build obtains signed Alpine package updates. First builds require
 access to the image and package registries.
-Docker uses named volumes for the n8n database and encryption key, the internal
-webhook token, and SQLite history. Keep all three private and back them up
+Docker uses named volumes for the n8n database and encrypted provider settings,
+the internal webhook token, and SQLite history. Keep all three private and back them up
 together. Stop the services without removing their volumes.
 
 ```sh
@@ -38,14 +39,20 @@ commands. Review any logs locally before sharing them.
 
 Back up the volumes and rebuild with the launcher. The authentication migration
 updates the installed UI triggers and restricts the packaged chat trigger to
-the editor. The analysis migration updates the shipped OpenAI request nodes.
-Keep custom workflow backups and inspect changes to these nodes after updating.
+the editor. The provider migration imports the existing OpenAI credential into
+the encrypted settings store and sends the installed model requests through
+the local adapter. Manage installed provider credentials from **Settings →
+AI providers** after updating. Keep custom workflow backups and inspect the
+analysis nodes after updating.
 The removed `deployment/compose.env` used to enable the Docs button by default.
 If you already configured Docs, set `GOOGLE_DOCS_ENABLED=true` in the launcher
 environment on each rebuild or restart. The Docker-managed token and history
 paths remain in the existing volumes.
 
 ## Standalone with an existing local n8n
+
+The standalone workflow exports continue to use OpenAI directly. The Docker
+installation provides the three-provider settings and adapter.
 
 Use a security-patched Node.js release, pnpm and a supported local n8n 2.x
 instance. For Node.js 22, use 22.23.4 or later. The

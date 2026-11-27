@@ -24,6 +24,30 @@ export function secureWebhooks(workflow) {
   return workflow;
 }
 
+export const PROVIDER_ENDPOINT = 'http://127.0.0.1:5689/generate';
+
+export function routeProviderRequests(workflow) {
+  if (!CORE_WORKFLOW_IDS.includes(workflow.id)) return false;
+  let found = false;
+  for (const node of workflow.nodes) {
+    if (node.type !== 'n8n-nodes-base.httpRequest' ||
+        !['https://api.openai.com/v1/responses', PROVIDER_ENDPOINT].includes(node.parameters.url)) continue;
+    node.parameters.url = PROVIDER_ENDPOINT;
+    node.credentials = { ...node.credentials, httpHeaderAuth: { id: WEBHOOK_CREDENTIAL_ID, name: 'Ortak Akıl internal access' } };
+    found = true;
+  }
+  return found;
+}
+
+export function restoreProviderRequests(workflow) {
+  if (!CORE_WORKFLOW_IDS.includes(workflow.id)) return;
+  for (const node of workflow.nodes) {
+    if (node.type !== 'n8n-nodes-base.httpRequest' || node.parameters.url !== PROVIDER_ENDPOINT) continue;
+    node.parameters.url = 'https://api.openai.com/v1/responses';
+    node.credentials = { ...node.credentials, httpHeaderAuth: { id: OPENAI_CREDENTIAL_ID, name: 'OpenAI API' } };
+  }
+}
+
 export function prepareWorkflow(source) {
   const workflow = structuredClone(source);
   for (const key of ['shared', 'createdAt', 'updatedAt', 'activeVersionId', 'versionCounter', 'triggerCount', 'meta', 'sourceWorkflowId']) delete workflow[key];
@@ -40,5 +64,6 @@ export function prepareWorkflow(source) {
       if (node.credentials?.[type]) delete node.credentials[type];
     }
   }
+  routeProviderRequests(workflow);
   return secureWebhooks(workflow);
 }

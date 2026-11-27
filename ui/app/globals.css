@@ -21,7 +21,7 @@
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
-  background: linear-gradient(180deg, #ffffff 0%, #ffffff 36%, #eaf8ff 75%, #d2f1fc 100%);
+  background: #fff;
   color: var(--ink);
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -29,10 +29,72 @@ body {
 button, textarea, input, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 
+@property --theme-wash {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #eaf8ff;
+}
+@property --theme-gradient-end {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #d2f1fc;
+}
+
 .app-shell {
+  --composer-surface: rgb(245 251 255 / 94%);
+  --thought-stroke: #6ca8cd;
+  --thought-pulse: #147dc0;
+  --thinking-border: #a6cefa;
+  --thinking-surface: #e5f1ff;
+  --thinking-ink: #1672db;
   --layout-edge: clamp(10px, 2vw, 24px);
   --layout-top: clamp(12px, 2.5dvh, 28px);
   min-height: 100vh;
+  color: var(--ink);
+  background: linear-gradient(180deg, #fff 36%, var(--theme-wash, #eaf8ff) 75%, var(--theme-gradient-end, #d2f1fc));
+}
+.app-shell[data-theme="openai"] {
+  --ink: #24443b;
+  --muted: #4d675d;
+  --paper: #f6fbf8;
+  --line: #cfe3d9;
+  --blue: #14684e;
+  --blue-soft: #dbf0e6;
+  --navy: #17523f;
+  --composer-surface: #f6fbf8f0;
+  --theme-wash: #e9f7ef;
+  --theme-gradient-end: #cdebdc;
+}
+.app-shell[data-theme="claude"] {
+  --ink: #582e21;
+  --muted: #75584a;
+  --paper: #fff9f5;
+  --line: #ead6c9;
+  --blue: #a0492d;
+  --blue-soft: #fbe8dc;
+  --navy: #743622;
+  --composer-surface: #fff9f5f0;
+  --theme-wash: #fff2ea;
+  --theme-gradient-end: #f6d8c6;
+}
+.app-shell[data-theme="gemini"] {
+  --ink: #343067;
+  --muted: #5e5b80;
+  --paper: #f9f8ff;
+  --line: #dfdbf1;
+  --blue: #5244b4;
+  --blue-soft: #eae7ff;
+  --navy: #403383;
+  --composer-surface: #f9f8fff0;
+  --theme-wash: #f0eeff;
+  --theme-gradient-end: #ddd8fa;
+}
+.app-shell[data-theme]:not([data-theme="default"]) {
+  --thought-stroke: var(--blue);
+  --thought-pulse: var(--blue);
+  --thinking-border: var(--line);
+  --thinking-surface: var(--blue-soft);
+  --thinking-ink: var(--blue);
 }
 .topbar {
   height: var(--topbar-height);
@@ -84,65 +146,27 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .question-form textarea:disabled { opacity: .7; }
 .model-field { border-top: 1px solid var(--line); padding: 17px 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: center; }
 .model-field label { margin: 0; }
-.model-field input { min-width: 0; width: 100%; border: 1px solid var(--line); background: #f4faff; color: var(--ink); padding: 10px 12px; }
-.model-field input:disabled, .model-picker > button:disabled { opacity: .7; }
-#model-label { font-size: .875rem; font-weight: 650; }
-.model-picker > button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  min-height: 42px;
-  padding: 8px 12px;
+.model-field label { font-size: .875rem; font-weight: 650; }
+.model-field select, .setup-panel select, .composer-model {
+  min-width: 0;
+  padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--paper);
   color: var(--ink);
-  font-weight: 650;
-  text-align: start;
-  cursor: pointer;
 }
-.model-picker > button::after {
-  content: "";
-  flex: none;
-  width: 7px;
-  height: 7px;
-  margin-inline-end: 3px;
-  border: solid currentColor;
-  border-width: 0 1px 1px 0;
-  transform: rotate(45deg);
+.composer-model { max-inline-size: min(15rem, 100%); font-size: .75rem; }
+.composer-model-label, .thread-model {
+  color: var(--muted);
+  font-size: .75rem;
 }
-.model-picker > button[aria-expanded="true"]::after { transform: rotate(225deg); }
-.model-choices {
-  position: fixed;
-  inset: auto;
-  margin: 0;
-  gap: 2px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 5px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
-  box-shadow: 0 8px 22px rgb(6 78 104 / 15%);
-}
-.model-choices:popover-open { display: grid; }
-.model-choices button {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--ink);
-  font-size: .875rem;
-  text-align: start;
-  cursor: pointer;
-}
-.model-choices button:is(:hover, [aria-pressed="true"]) { background: var(--blue-soft); }
-.model-choices button[aria-pressed="true"]::after { content: "✓" / ""; color: var(--blue); }
+.thread-model { align-self: flex-end; margin-block-end: 5px; }
+.provider-settings { display: grid; gap: 6px; min-inline-size: 0; margin-block: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.provider-settings legend, .provider-settings label { font-size: .8rem; }
+.provider-settings legend { font-weight: 650; padding-inline: 4px; }
+.provider-settings .text-button:disabled { opacity: .55; cursor: default; }
+.provider-settings [role="alert"] { color: #842f31; }
+.provider-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .text-button { border: 0; background: transparent; padding: 0; color: var(--blue); font-size: 12px; font-weight: 750; cursor: pointer; }
 .primary-button, .secondary-button { border: 0; cursor: pointer; font-weight: 750; transition: .2s ease; }
 .primary-button { border-radius: 6px; min-width: 170px; height: 46px; padding: 0 18px; color: white; background: var(--blue); display: flex; align-items: center; justify-content: center; gap: 16px; }
@@ -374,8 +398,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
     transition-duration: 150ms;
   }
 }
-.thought-stream { fill: none; stroke: #6ca8cd; stroke-width: 1.25; opacity: .63; }
-.thought-pulse { display: none; fill: #147dc0; }
+.thought-stream { fill: none; stroke: var(--thought-stroke); stroke-width: 1.25; opacity: .63; }
+.thought-pulse { display: none; fill: var(--thought-pulse); }
 @media (prefers-reduced-motion: no-preference) {
   .thought-pulse { display: block; }
 }
@@ -396,7 +420,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .thinking-bubble {
   width: max-content; min-width: 65px; margin: 0;
   display: flex; justify-content: center; align-items: center; gap: 7px; padding: 10px 14px;
-  border: 1px solid #a6cefa; border-radius: 20px; background: #e5f1ff; color: #1672db;
+  border: 1px solid var(--thinking-border); border-radius: 20px; background: var(--thinking-surface); color: var(--thinking-ink);
 }
 @media (prefers-reduced-motion: no-preference) {
   .thinking-bubble i:nth-child(2) { animation: thinking-second 1.5s step-end infinite; }
@@ -639,7 +663,6 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .expert-role-tooltip { overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: no-preference) {
   .composer-panel details[open]:not([data-history-disclosure]) > :not(summary),
-  .model-choices:popover-open,
   .diagram-dialog[open] {
     animation: popup-reveal var(--popup-duration) var(--popup-easing) both;
   }
@@ -961,7 +984,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 
 .evaluation-layout .question-card {
   --composer-inline-padding: clamp(4px, calc(1.6vw - 8px), 8px);
-  --composer-background: rgb(245 251 255 / 94%);
+  --composer-background: var(--composer-surface);
   position: relative;
   flex-shrink: 0;
   z-index: 2;
@@ -1046,7 +1069,9 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
       opacity var(--popup-duration) var(--popup-easing),
       translate var(--popup-duration) var(--popup-easing),
       scrollbar-color 200ms ease,
-      visibility 0s var(--popup-duration);
+      visibility 0s var(--popup-duration),
+      background-color var(--popup-duration) ease,
+      border-color var(--popup-duration) ease;
   }
   .evaluation-layout .question-card > .composer-panel[data-open="true"] {
     translate: 0 0;
@@ -1334,4 +1359,19 @@ button.history-question[aria-current="true"] { cursor: default; }
 .language-picker:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-shell {
+    transition: --theme-wash 200ms ease, --theme-gradient-end 200ms ease, color 200ms ease;
+  }
+  .app-shell :is(.question-card, .history-question, .settings-toggle, .composer-model,
+    .model-field select, .provider-settings, .thinking-bubble, .status-working, .thread-question) {
+    transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease;
+  }
+  .thought-stream { transition: stroke 200ms ease; }
+  .thought-pulse { transition: fill 200ms ease; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .primary-button.symbol-send { transition: none; }
 }

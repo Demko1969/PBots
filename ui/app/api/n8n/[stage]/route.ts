@@ -1,3 +1,4 @@
+import { isProvider, providerForModel, providers } from "../../../../lib/provider-catalog.mjs";
 import { NextRequest, NextResponse } from "next/server";
 import { checkRequest, readJson, internalHeaders, reserveRequest, RequestError } from "../../../../lib/server-security";
 import { diagramPreference, diagramRequirement, diagramValidationIssue, minimumScenarioBranches, needsReviewLoop } from "../../../../lib/judge-review";
@@ -59,6 +60,15 @@ export async function POST(
     const headers = await internalHeaders();
     release = reserveRequest();
     let body = await readJson(request, stage === "attachment" ? Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4 + 50_000 : 512 * 1024);
+    const model = typeof body.openaiModel === "string" && body.openaiModel.trim()
+      ? body.openaiModel.trim() : process.env.OPENAI_MODEL || providers.openai.model;
+    const provider = body.provider ?? "openai";
+    if (stage !== "docs" && (!isProvider(provider) || provider !== providerForModel(model) ||
+      (provider !== "openai" && !process.env.SETUP_SERVICE_URL))) {
+      throw new RequestError("Geçersiz sağlayıcı veya model.", 400);
+    }
+    delete body.provider;
+    if (stage !== "docs") body.openaiModel = model;
     if (stage === "attachment") {
       const { name, base64, question, openaiModel } = body;
       const mime = typeof name === "string" && name.length <= 255 ? attachmentType(name) : undefined;
@@ -97,13 +107,10 @@ export async function POST(
       ? {
           ...body,
           planFeedback: undefined,
-          openaiModel:
-            typeof body.openaiModel === "string" && body.openaiModel.trim()
-              ? body.openaiModel.trim()
-              : process.env.OPENAI_MODEL || "gpt-5-mini",
         }
       : body;
     const signal = AbortSignal.any([request.signal, AbortSignal.timeout(stage === "attachment" ? 120_000 : 20 * 60 * 1000)]);
+    const stageError = stage === "docs" ? "Google Docs bağlantısı doğrulanamadı." : "Değerlendirme tamamlanamadı. Ayarlarda model bağlantısını ve kotayı kontrol edin veya başka bir sağlayıcı seçip soruyu yeniden gönderin.";
     async function invoke(input: Record<string, unknown>) {
       const response = await fetch(`${baseUrl}/${endpoint}`, {
         method: "POST",
@@ -112,16 +119,16 @@ export async function POST(
         signal,
         cache: "no-store",
         redirect: "error",
-      });
+      }).catch(() => { throw new RequestError(stageError, 502); });
       if (!response.ok) {
-        throw new RequestError(stage === "attachment"
-          ? `Dosya okunamadı (${response.status}). Dosyayı ve seçili modelin görsel desteğini kontrol edin.`
-          : `İş akışı tamamlanamadı (${response.status}). Bağlantı ve model erişimini kontrol edin.`,
+        await response.body?.cancel();
+        throw new RequestError(stageError,
           response.status === 429 ? 429 : 502);
       }
-      const data = await readJson(response, 2 * 1024 * 1024);
+      const data = await readJson(response, 2 * 1024 * 1024)
+        .catch(() => { throw new RequestError(stageError, 502); });
       if (typeof data.error === "string" || !Object.keys(data).length) {
-        throw new RequestError("İş akışı geçerli bir sonuç üretmedi. n8n bağlantısını ve model erişimini kontrol edin.", 502);
+        throw new RequestError(stageError, 502);
       }
       return data;
     }
@@ -182,6 +189,7 @@ export async function POST(
           issue = validate(data);
         } catch {
           if (request.signal.aborted) return new NextResponse(null, { status: 499 });
+          if (firstIssue) throw new RequestError(stageError, 502);
           issue = "İkinci doğrulama tamamlanamadı.";
         }
         if (issue && !firstIssue && first.showDiagram === true) {

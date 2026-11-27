@@ -106,7 +106,7 @@ test("runs Planner, Experts and Judge in order and publishes checkpointed progre
   assert.deepEqual(requests.at(-1).payload.answers.map(answer => answer.agentId), [1, 2, 3]);
   assert.equal(requests.at(-1).payload.openaiModel, "test-model");
   assert.equal(run.result.finalAnswer, "Stok hedefini talebe göre ayarlayın.");
-  assert.deepEqual(checkpoints.map(saved => saved.answers.length), [0, 1, 2, 3, 3]);
+  assert.deepEqual(checkpoints.map(saved => saved.answers.length), [0, 0, 1, 2, 3, 3]);
   assert.deepEqual(checkpoints.at(-1), run);
   assert.deepEqual(history, ["lock", "find", "unlock"]);
 });
@@ -343,4 +343,103 @@ test("uses the current question for language selection and forwards the Planner'
   assert.ok(requests[0].payload.question.includes(first.question));
   assert.ok(requests.slice(1).every(request => request.payload.replyLanguage === "tr"));
   assert.equal(run.result.finalAnswer, "Stok hedefini talebe göre ayarlayın.");
+});
+
+test("captures each provider and model across stages while changing selection for the next question", async () => {
+  const first = evaluationFixture();
+  const post = first.dependencies.postStage;
+  first.dependencies.postStage = async (stage, payload) => {
+    const output = await post(stage, payload);
+    return stage === "plan" ? { ...output, model: "spoofed-model", openaiModel: "spoofed-model" } : output;
+  };
+  let next = { provider: "openai", model: "gpt-5-mini" };
+  first.dependencies.onProgress = () => { next = { provider: "gemini", model: "gemini-3.8-flash" }; };
+  const { run } = await runEvaluation({ ...first.input, ...next }, first.dependencies);
+  assert.ok(first.requests.every(({ payload }) => payload.provider === "openai" && payload.openaiModel === "gpt-5-mini"));
+
+  const followUp = evaluationFixture();
+  const { run: second } = await runEvaluation({
+    ...followUp.input, ...next, question: "What about the second warehouse?", followUp: run,
+  }, followUp.dependencies);
+  assert.notEqual(run.requestKey, second.requestKey);
+  assert.equal(second.parentRunId, run.id);
+  assert.equal(second.provider, "gemini");
+  assert.equal(second.model, "gemini-3.8-flash");
+  assert.match(followUp.requests[0].payload.question, /Stok hedefini/);
+  assert.ok(followUp.requests.every(({ payload }) => payload.provider === "gemini" && payload.openaiModel === "gemini-3.8-flash"));
+});
+
+test("resumes the saved pair and can explicitly restart with another provider from Planner", async () => {
+  const initial = evaluationFixture();
+  const post = initial.dependencies.postStage;
+  initial.dependencies.postStage = async (stage, payload) => {
+    if (stage === "judge") throw new Error("Provider temporarily unavailable");
+    return post(stage, payload);
+  };
+  await assert.rejects(runEvaluation({
+    ...initial.input, provider: "claude", model: "claude-sonnet-5-5",
+  }, initial.dependencies), /temporarily unavailable/);
+  const checkpoint = initial.checkpoints.at(-1);
+  assert.equal(checkpoint.answers.length, 3);
+
+  const retry = evaluationFixture();
+  const other = { ...retry.input, provider: "gemini", model: "gemini-3.8-flash" };
+  retry.dependencies.readHistory = async query => {
+    assert.equal(query.id, checkpoint.id);
+    return { run: checkpoint };
+  };
+  const { run } = await runEvaluation({ ...other, resume: checkpoint }, retry.dependencies);
+  assert.equal(run.id, checkpoint.id);
+  assert.deepEqual(retry.requests.map(({ stage }) => stage), ["judge"]);
+  assert.equal(retry.requests[0].payload.provider, "claude");
+  assert.equal(retry.requests[0].payload.openaiModel, "claude-sonnet-5-5");
+
+  const replacement = evaluationFixture();
+  replacement.dependencies.readHistory = async () => { throw new Error("A replacement must start fresh"); };
+  const { run: replaced } = await runEvaluation({ ...other, restart: true }, replacement.dependencies);
+  assert.notEqual(replaced.id, run.id);
+  assert.notEqual(replaced.requestKey, run.requestKey);
+  assert.equal(replacement.requests[0].stage, "plan");
+  assert.ok(replacement.requests.every(({ payload }) => payload.provider === "gemini"));
+});
+
+test("carries the same provider through media evidence and solution diagram stages", async () => {
+  const { providers } = await import("../lib/provider-catalog.mjs");
+  const { parseCsv } = await import("../lib/table.ts");
+  const question = "Create a solution diagram for the warehouse allocation process.";
+  const flow = { nodes: [{ id: "a", title: "Get stock" }, { id: "b", title: "Allocate stock" }], edges: [{ from: "a", to: "b" }] };
+  const csvSource = { name: "stock.csv", text: "warehouse,stock\nNorth,4\nSouth,7\n" };
+  const cases = [
+    { name: "text" },
+    { name: "csv", csvSource, table: parseCsv(csvSource.text, csvSource.name) },
+    { name: "photo.jpg", mime: "image/jpeg" },
+    { name: "chart.png", mime: "image/png" },
+    { name: "stock.pdf", mime: "application/pdf" },
+  ];
+  for (const [provider, { model }] of Object.entries(providers)) {
+    for (const { name, mime, ...data } of cases) {
+      const { input, dependencies, requests } = evaluationFixture();
+      const post = dependencies.postStage;
+      dependencies.postStage = (stage, payload) => {
+        if (stage === "attachment") {
+          requests.push({ stage, payload });
+          assert.equal(payload.name, name);
+          assert.equal(payload.base64, "AAEC");
+          return Promise.resolve({ evidence: "North has four units" });
+        }
+        if (stage === "judge") return post(stage, payload).then(response => ({ ...response, showDiagram: true, diagram: flow }));
+        return post(stage, payload);
+      };
+      const media = mime ? { file: new File([Uint8Array.from([0, 1, 2])], name, { type: mime }), digest: name } : null;
+      const { run } = await runEvaluation({ ...input, ...data, provider, model, question, media }, dependencies);
+      assert.deepEqual(run.result.diagram, flow);
+      assert.equal(run.model, model);
+      assert.deepEqual(requests.map(request => request.stage), [
+        ...(mime ? ["attachment"] : []), "plan", "worker", "worker", "worker", "judge",
+      ]);
+      assert.ok(requests.every(({ payload }) => payload.provider === provider && payload.openaiModel === model));
+      if (mime) assert.match(requests.find(request => request.stage === "plan").payload.question, /North has four units/);
+      if (data.csvSource) assert.match(requests[0].payload.question, /CSV analysis context/);
+    }
+  }
 });
