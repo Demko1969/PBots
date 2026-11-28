@@ -4,7 +4,11 @@ import { checkRequest, readJson, internalHeaders, RequestError } from "../../../
 export async function GET(request: NextRequest) {
   try { checkRequest(request, false); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Geçersiz istek." }, { status: 403 }); }
-  if (!process.env.SETUP_SERVICE_URL) return NextResponse.json({ enabled: false, defaultModel: process.env.OPENAI_MODEL || "gpt-5-mini" });
+  if (!process.env.SETUP_SERVICE_URL) return NextResponse.json({
+    enabled: false,
+    defaultModel: process.env.OPENAI_MODEL || "gpt-5-mini",
+    docsEnabled: process.env.GOOGLE_DOCS_ENABLED === "true",
+  });
   try {
     const response = await fetch(`${process.env.SETUP_SERVICE_URL}/status`, {
       headers: await internalHeaders(), cache: "no-store", redirect: "error", signal: AbortSignal.timeout(5000),

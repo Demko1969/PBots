@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 function normalizePlanner(content, question, openaiModel) {
   let plan;
@@ -60,6 +61,108 @@ assert.equal(normalized.agents.filter(agent => agent.role === 'Süreç Analisti'
 assert.throws(() => normalizePlanner('{not json', 'x'), /ayrıştırma/);
 assert.throws(() => normalizePlanner(JSON.stringify({ complexity: 'low', agents: [] }), 'x'), /boş olmayan/);
 assert.throws(() => normalizePlanner(JSON.stringify({ complexity: 'extreme', agents: [{}] }), 'x'), /complexity/);
+
+// Exercise the exported Planner node, including the roles omitted by the old four-agent cap.
+const plannerWorkflow = JSON.parse(readFileSync(new URL('../workflows/multi-agent-planner.json', import.meta.url), 'utf8'));
+const plannerRequest = plannerWorkflow.nodes.find(node => node.name === 'Call OpenAI Planner').parameters.jsonBody;
+const normalizeNode = plannerWorkflow.nodes.find(node => node.name === 'Validate and Normalize Plan');
+const roles = ['Üretim Planlama', 'Finans', 'Veri Göçü', 'Siber Güvenlik', 'Lojistik', 'Değişim Yönetimi'];
+const modelPlan = {
+  question_type: 'ERP geçişi',
+  complexity: 'high',
+  agents: [
+    ...roles.map(role => ({ role, task: `${role} açısından kendi geçiş risklerini ve eşiklerini incele.` })),
+    { role: 'Eylem Planlama Uzmanı', task: 'Her uzmanın bulgularına dayanarak önceliklendirilmiş yol haritası hazırla.' },
+    { role: 'ERP Geçiş Danışmanı', task: 'Her uzmanın bulgularına dayanarak düzeltmeleri sırala.' },
+    { role: 'ERP Strateji Uzmanı', task: 'Altı değerlendirmeye dayanarak üç geçiş seçeneğini puanla, yol haritası ve bütçe hazırla, en uygun stratejiyi seç.' },
+    { role: 'Geçiş Programı Danışmanı', task: 'Diğer uzmanların görüşlerine dayanarak ortak puanları hesapla.' },
+    { role: 'Karar ve Yol Haritası Koordinatörü', task: 'Üç geçiş seçeneğini puanla, yol haritası ve geri dönüş eşiklerini bütünleştir.' },
+  ],
+};
+const runPlannerNode = new Function('$input', '$', normalizeNode.parameters.jsCode);
+const execution = runPlannerNode(
+  { first: () => ({ json: { output: [{ content: [{ type: 'output_text', text: JSON.stringify(modelPlan) }] }] } }) },
+  () => ({ first: () => ({ json: { question: originalQuestion, model: centralModel } }) }),
+)[0].json;
+assert.match(plannerRequest, /maxItems: 10/);
+const csvQuestion = originalQuestion + '\n\nCSV analysis context\n{"columns":[{"name":"cozum_saat"}]}';
+const planModelInput = new Function('$json', `return (${plannerRequest.slice(3, -2)});`);
+assert.ok(planModelInput({ question: csvQuestion }).input.includes(csvQuestion));
+assert.equal(execution.agentCount, 6);
+assert.deepEqual(execution.agents.map(agent => agent.role), roles);
+assert.match(execution.planIssue, /ortak karar/);
+
+const workerWorkflow = JSON.parse(readFileSync(new URL('../workflows/multi-agent-worker.json', import.meta.url), 'utf8'));
+const validateWorker = new Function('$input', workerWorkflow.nodes.find(node => node.name === 'Validate Worker Input').parameters.jsCode);
+const workerInput = { question: originalQuestion, openaiModel: centralModel, agentId: 1, role: 'ERP Geçiş Testi Uzmanı' };
+const runWorker = task => validateWorker({ first: () => ({ json: { ...workerInput, task } }) });
+assert.throws(() => runWorker('Her uzmanın bulgularına dayanarak düzeltmeleri sırala.'), /bağımsız/);
+assert.equal(runWorker('Geçişte stok aktarımı için kabul testleri tasarla.')[0].json.agentId, 1);
+
+const workerRequest = workerWorkflow.nodes.find(node => node.name === 'Call OpenAI Worker').parameters.jsonBody;
+const makeWorkerRequest = new Function('$json', `return (${workerRequest.slice(3, -2)});`);
+const readEvidence = new Function('$input', '$', workerWorkflow.nodes.find(node => node.name === 'Normalize Worker Output').parameters.jsCode);
+for (const [name, mime, type] of [
+  ['grafik.png', 'image/png', 'input_image'],
+  ['fotograf.jpg', 'image/jpeg', 'input_image'],
+  ['rapor.pdf', 'application/pdf', 'input_file'],
+]) {
+  const input = { question: 'Dosyada ne var?', openaiModel: centralModel, attachment: { name, mime, base64: 'YWJj' } };
+  const normalizedInput = validateWorker({ first: () => ({ json: input }) })[0].json;
+  const request = makeWorkerRequest(normalizedInput);
+  const item = request.input[0].content[1];
+  assert.equal(request.store, false);
+  assert.equal(item.type, type);
+  assert.equal(item.image_url ?? item.file_data, `data:${mime};base64,YWJj`);
+  const output = { output: [{ content: [{ type: 'output_text', text: 'Dosyadan gözlem' }] }] };
+  const result = readEvidence({ first: () => ({ json: output }) }, () => ({ first: () => ({ json: normalizedInput }) }));
+  assert.deepEqual(result, [{ json: { evidence: 'Dosyadan gözlem' } }]);
+}
+
+const judgeWorkflow = JSON.parse(readFileSync(new URL('../workflows/multi-agent-judge.json', import.meta.url), 'utf8'));
+const validateComparison = new Function('$input', '$', judgeWorkflow.nodes.find(node => node.name === 'Validate Comparison Notes').parameters.jsCode);
+const judgeInput = { question: originalQuestion, answers: [{ agentId: 1, answer: 'İnceleme eşiği önerildi.' }, { agentId: 2, answer: 'Geçiş eşiği açıklanmadı.' }] };
+const comparisonResult = response => validateComparison(
+  { first: () => ({ json: response }) },
+  () => ({ first: () => ({ json: judgeInput }) }),
+)[0].json;
+const note = { kind: 'evidence_gap', agentIds: [1, 2], detail: 'Nihai kabul eşiği gerekçelendirilmemiş.' };
+const notes = [note, { ...note, agentIds: [99] }, { ...note, kind: 'conflict', agentIds: [1, 1] }];
+const reviewed = comparisonResult({ status: 'completed', output: [{ content: [{ type: 'output_text', text: JSON.stringify({ notes }) }] }] });
+assert.deepEqual(reviewed.comparisonNotes, [note]);
+assert.deepEqual(reviewed.answers, judgeInput.answers);
+assert.deepEqual(comparisonResult({ error: 'Timeout' }).comparisonNotes, []);
+
+const mixedPlan = runPlannerNode(
+  { first: () => ({ json: { output: [{ content: [{ type: 'output_text', text: JSON.stringify({
+    complexity: 'medium', agents: [
+      { role: 'Veri Kalitesi Uzmanı', task: 'Stok kayıtlarındaki uyuşmazlıkları incele.' },
+      { role: 'Toparlayıcı', task: 'Bulguları düzenle.' },
+      { role: 'Finansal riskleri hesapla', task: 'Kredi ve nakit risklerini karşılaştır.' },
+      { role: 'Finans Analisti', task: 'Bütçedeki sapmaları incele.' },
+    ],
+  }) }] }] } }) },
+  () => ({ first: () => ({ json: { question: originalQuestion, model: centralModel } }) }),
+)[0].json;
+assert.deepEqual(mixedPlan.agents.map(agent => agent.role), ['Veri Kalitesi Uzmanı', 'Finans Analisti']);
+assert.match(mixedPlan.planIssue, /role kısa/);
+
+const planResponse = 'Bu uygulamada PNG dosyası üretemiyorum. İstersen SVG kodu hazırlayabilirim.';
+const blockedPlan = runPlannerNode(
+  { first: () => ({ json: { output: [{ content: [{ type: 'output_text', text: JSON.stringify({
+    question_type: 'görsel', complexity: 'low', agents: [], direct_response: planResponse,
+  }) }] }] } }) },
+  () => ({ first: () => ({ json: { question: 'Bir PNG çiz.', model: centralModel } }) }),
+)[0].json;
+const uiPlanner = JSON.parse(readFileSync(new URL('../workflows/multi-agent-ui-plan.json', import.meta.url), 'utf8'));
+const uiResponseNode = uiPlanner.nodes.find(node => node.name === 'Format UI Plan Response');
+const formatPlanResponse = new Function('$input', uiResponseNode.parameters.jsCode);
+const blockedUIPlan = formatPlanResponse({ first: () => ({ json: blockedPlan }) })[0].json;
+assert.equal(blockedUIPlan.directResponse, planResponse);
+assert.deepEqual(blockedUIPlan.agents, []);
+assert.equal(blockedUIPlan.agentCount, 0);
+assert.equal(formatPlanResponse({ first: () => ({ json: execution }) })[0].json.agentCount, 6);
+assert.equal(formatPlanResponse({ first: () => ({ json: mixedPlan }) })[0].json.planIssue, mixedPlan.planIssue);
 
 const workerItems = normalized.agents.map(agent => ({ question: normalized.question, openaiModel: normalized.openaiModel, agentId: agent.agent_id, role: agent.role, task: agent.task }));
 assert.equal(workerItems.length, normalized.agentCount);

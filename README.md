@@ -4,7 +4,7 @@ Bu proje bir soruyu bağımsız uzman rollerine böler, uzman yanıtlarını par
 
 ## İndirme ve yerel kurulum
 
-1. [GitHub deposunda](https://github.com/Demko1969/ortak-akil) **Code → Download ZIP** seçeneğini kullanın ve ZIP’i açın. Özel depoyu indirmek için GitHub hesabınıza giriş yapmanız ve depoya erişiminiz olması gerekir. Git kullanıyorsanız `git clone https://github.com/Demko1969/ortak-akil.git` komutunu çalıştırabilirsiniz.
+1. [GitHub deposunda](https://github.com/Demko1969/Ai_Project) **Code → Download ZIP** seçeneğini kullanın ve ZIP’i açın. Önce Git geçmişindeki eski özel raporlar için [güvenlik notlarını](SECURITY.md#repository-history) okuyun. Özel depoyu indirmek için GitHub hesabınıza giriş yapmanız ve depoya erişiminiz olması gerekir. Git kullanıyorsanız `git clone https://github.com/Demko1969/Ai_Project.git` komutunu çalıştırabilirsiniz.
 2. Docker Desktop’ı kurup başlatın. macOS ve Linux’ta terminali çıkardığınız proje klasöründe açıp aşağıdaki komutu çalıştırın. Windows’ta Docker Desktop’ı Linux container modunda başlatıp `scripts/start.cmd` dosyasını açın.
 
    ```sh
@@ -16,15 +16,17 @@ Bu proje bir soruyu bağımsız uzman rollerine böler, uzman yanıtlarını par
 
 Docker, arayüz bağımlılıklarını imajın içinde kurar. Bu kurulum için bilgisayarınızda Node.js, npm veya `node_modules` klasörü gerekmez. Gerçek değerlendirmeler OpenAI API kullanımı oluşturur. Google Docs aktarımı isteğe bağlıdır ve kendi Google bağlantınızı gerektirir.
 
-Yedekleme, Google Docs ve sorun giderme için [yerel kurulum kılavuzuna](deployment/README.md) bakın. Dağıtım kontrolleri ve bilinen sınırlar [SECURITY.md](SECURITY.md) dosyasındadır. Yerel kaynak ZIP’i `python3 scripts/package-release.py` ile hazırlanabilir.
+Yedekleme, Google Docs ve sorun giderme için [yerel kurulum kılavuzuna](deployment/README.md) bakın. Dağıtım kontrolleri ve bilinen sınırlar [SECURITY.md](SECURITY.md) dosyasındadır. İncelenmiş bir Git commit’inden yerel kaynak ZIP’i üretmek için `python3 scripts/package-release.py` komutunu kullanın.
 
 ## Değerlendirme geçmişi
 
-Sonuçlar, uzman yanıtları, diyagram ve varsa Google Docs bağlantısı Docker’ın `evaluation_history` volume’undaki yerel SQLite veritabanında saklanır. Aynı yerel kurulumun tarayıcıları bu geçmişi paylaşır. Önceden kaydedilmiş tarayıcı geçmişi, o tarayıcıda uygulama ilk açıldığında içe aktarılır.
+Sonuçlar, uzman yanıtları, diyagram ve varsa Google Docs bağlantısı Docker’da `evaluation_history` volume’unda, elle kurulumda varsayılan olarak `~/.ortak-akil/evaluations.sqlite` dosyasında saklanır. Aynı yerel kurulumun tarayıcıları bu geçmişi paylaşır. Önceden kaydedilmiş tarayıcı geçmişi, o tarayıcıda uygulama ilk açıldığında içe aktarılır.
 
-Aynı soru, model, CSV dosyası ve sütun açıklamaları tekrar gönderildiğinde kayıtlı sonuç yeni OpenAI isteği olmadan açılır. Yarım kalan çalışmada kaydedilmiş plan ve uzman yanıtları kullanılır. Kesinti anında henüz kaydedilmemiş çağrılar tekrar çalışabilir. **Yeniden çalıştır** yeni API kullanımı oluşturur.
+Aynı soru, model ve CSV dosyası tekrar gönderildiğinde kayıtlı sonuç yeni OpenAI isteği olmadan açılır. Yarım kalan çalışmada kaydedilmiş plan ve uzman yanıtları kullanılır. Kesinti anında henüz kaydedilmemiş çağrılar tekrar çalışabilir. **Yeniden çalıştır** yeni API kullanımı oluşturur.
 
-OpenAI anahtarı n8n’in şifreli kimlik bilgisi deposunda kalır. Geçmişin yerel HTTP uç noktası tarayıcının uygulamayla aynı kaynaktan yaptığı JSON isteklerini kabul eder. Geçmişe değerlendirme metinleri ve CSV örnekleri yansıyabilir. **Sil** tek bir kaydı kaldırır. Volume’u silmeden önce geçmişi korumak için yedekleyin.
+**Bu değerlendirme hakkında soru sor** düğmesi, açık sonucun sorusunu, yanıtını ve değerlendirmede kullanılan CSV özetini takip sorusuna bağlar. Takip soruları da geçmişe kaydedilir.
+
+OpenAI anahtarı n8n’in şifreli kimlik bilgisi deposunda kalır. Geçmişin yerel HTTP uç noktası tarayıcının uygulamayla aynı kaynaktan yaptığı JSON isteklerini kabul eder. Geçmişe değerlendirme metinleri ve CSV örnekleri yansıyabilir. CSV önizlemelerindeki tanınan anahtar biçimleri yeni kayıtlarda gizlenir. Eski kayıt ve yedekler için [geçmişi taşıma adımlarına](deployment/README.md#existing-history-and-backups) bakın.
 
 ## Bileşenler
 
@@ -36,64 +38,11 @@ OpenAI anahtarı n8n’in şifreli kimlik bilgisi deposunda kalır. Geçmişin y
 - `ui/`: Next.js web arayüzüdür.
 - `scripts/sync-n8n.sh`: yalnızca tanımlı sekiz workflow'u n8n'den mevcut dosyalarına aktarır.
 
-## Elle kurulum için gereksinimler
+## Elle kurulum
 
-- n8n 2.x (paketlenen sürüm 2.46.6)
-- Node.js 22+
-- OpenAI API anahtarı
-- Google Docs çıktısı kullanılacaksa Google Drive ve Google Docs API erişimi
+n8n, güvenlik güncellemeleri uygulanmış Node.js ve pnpm gerekir. Web arayüzünü ve n8n'i yalnızca yerel makinede dinleyecek şekilde çalıştırın. [Elle kurulum kılavuzu](deployment/README.md#standalone-with-an-existing-local-n8n) sürüm, kimlik bilgileri, yayın sırası ve arayüz başlatma adımlarını içerir. Dört UI webhook'unda **Header Auth** seçin ve aynı sunucu anahtarını arayüze tanımlayın. OpenAI anahtarı n8n'de kalır.
 
-## OpenAI credential kurulumu
-
-API anahtarı Git'e veya workflow JSON dosyalarına yazılmaz. n8n'de bir **Header Auth** credential'ı oluşturun:
-
-- Name: `OpenAI API`
-- Header Name: `Authorization`
-- Header Value: `Bearer YOUR_OPENAI_API_KEY`
-
-Bu credential'ı aşağıdaki OpenAI HTTP Request node'larında seçin:
-
-- `Multi-Agent Planner2 → Call OpenAI Planner`
-- `Multi-Agent Worker2 → Call OpenAI Worker`
-- `Multi-Agent Judge2 → Call Final Judge Synthesis`
-
-Workflow JSON dosyalarında yalnızca taşınabilir credential referansı bulunur. Gerçek anahtar n8n'in şifreli credential deposunda kalır.
-
-## Import sırası
-
-1. `multi-agent-planner.json`
-2. `multi-agent-worker.json`
-3. `multi-agent-judge.json`
-4. `multi-agent-main.json`
-5. `multi-agent-ui-plan.json`
-6. `multi-agent-ui-worker.json`
-7. `multi-agent-ui-judge.json`
-8. `multi-agent-ui-docs.json`
-
-Import sonrasında OpenAI credential seçimlerini ve Execute Sub-workflow seçimlerini doğrulayın. Önce Planner, Worker ve Judge alt workflow'larını yayınlayın. Ardından UI Plan, Worker ve Judge webhook workflow'larını yayınlayın. Google Docs webhook'unu Google bağlantılarını yapılandırdıktan sonra yayınlayın.
-
-## Web arayüzü
-
-```sh
-cp ui/.env.example ui/.env.local
-cd ui
-npm install
-npm run dev
-```
-
-Ortam değişkenleri:
-
-```dotenv
-N8N_WEBHOOK_BASE_URL=http://127.0.0.1:5678/webhook
-OPENAI_MODEL=gpt-5-mini
-N8N_WEBHOOK_SECRET=
-```
-
-`OPENAI_MODEL` arayüzde önerilen başlangıç değeridir. Kullanıcı model alanını değiştirebilir; seçilen değer Planner, Worker ve Judge boyunca korunur. Varsayılan öneri hızlı ve ekonomik kullanım için `gpt-5-mini`'dir. Kullanıcı yalnızca kendi OpenAI hesabında erişimi bulunan bir model kimliği seçmelidir.
-
-## Google Drive ve Google Docs
-
-n8n'de Google Drive OAuth2 ve Google Docs OAuth2 credential'larını oluşturun. `Multi-Agent Main2` ve `Multi-Agent UI - Google Docs API` içindeki Drive/Docs node'larında kendi credential, Drive ve klasör seçimlerinizi yapın. `REPLACE_WITH_GOOGLE_DRIVE_FOLDER_ID` değerini hedef klasör kimliğiyle değiştirin.
+Google Docs için [isteğe bağlı ayarları](deployment/README.md#optional-google-docs-export) uygulayın.
 
 ## n8n'den senkronizasyon
 
@@ -109,7 +58,7 @@ Farklı bir ad kullanıyorsanız:
 N8N_CONTAINER=my-n8n ./scripts/sync-n8n.sh
 ```
 
-Senkronizasyon yalnızca sabit sekiz ID'yi dışa aktarır. OpenAI node'larında Header Auth credential bulunmuyorsa işlem dosyaları değiştirmeden durur.
+Senkronizasyon sabit sekiz ID ile sınırlıdır. UI webhook'ları ve OpenAI istekleri Header Auth kullanmalıdır. Araç, sabitlenmiş örnek verileri temizler ve workflow'ları yayına kapalı yazar. Commit etmeden önce diff'i özel veriler ve n8n ayarları için inceleyin.
 
 ## Doğrulama
 
@@ -122,21 +71,18 @@ Doğrulama workflow ID'lerini, bağlantıları, Code node sözdizimini, OpenAI c
 
 ## Güvenlik
 
-- API anahtarlarını `.env`, workflow JSON veya kaynak koda eklemeyin.
-- n8n credential deposunu kullanın.
-- İnternete açık webhook'larda TLS, kimlik doğrulama, hız sınırı ve istek boyutu sınırı uygulayın.
-- `N8N_WEBHOOK_SECRET`, n8n tarafında aynı başlığı doğrulayan bir kontrol yoksa tek başına koruma sağlamaz.
+Bu kurulum tek bir güvenilir yerel operatör içindir. Webhook anahtarı ve OpenAI anahtarı ayrı olmalıdır. Yalnızca webhook anahtarı, Git dışında tutulan `ui/.env.local` dosyasına yazılabilir. OpenAI anahtarını n8n credential deposunda saklayın. Varsayılan ağ erişimi, saklama ve veri akışı için [güvenlik notlarına](SECURITY.md) bakın.
+
+JPG, PNG ve PDF eklerinin tamamı inceleme için OpenAI’ye gönderilir. Alıntılanan bulgular geçmişe yansıyabilir. CSV için aşağıdaki örnekleme kuralları geçerlidir.
 
 ## CSV tablo analizi
 
-Web arayüzünde sorunuzla birlikte bir UTF-8 CSV dosyası seçebilirsiniz. Ayırıcı otomatik algılanır. Önizlemeyi inceleyin ve sütun anlamlarını
-(para birimi, kimlik alanları, tarih biçimi gibi) açıklayın. Önizlemeyi onayladıktan
-sonra uzmanları çalıştırın. Soru olmadan tablo analizi başlatılmaz.
+Web arayüzünde sorunuzla birlikte bir UTF-8 CSV dosyası seçebilirsiniz. Ayırıcı otomatik algılanır. Tablo önizlemesi açılır ve sütun başlıkları, örnek değerler ve soru metni analiz sırasında birlikte yorumlanır. Belirsiz birim ve sütun anlamları yanıtta belirtilir.
 
 - Dosya sınırları 1 MB, 5000 veri satırı ve 30 sütundur. Başlıklar dolu ve benzersiz olmalıdır.
 - Tarayıcı tüm dosyada eksik değerleri ve sayısal sütunların toplam, ortalama, minimum ve maksimumunu hesaplar.
 - Nokta ile yazılmış ondalıklar sayı olarak tanınır. Yerel para biçimleri, virgüllü ondalıklar ve tarihler metin olarak korunur. Hesaplamalar JavaScript kayan nokta sayılarını kullanır.
-- Dosya adı, sütun profili, açıklamalar ve ilk 10 satır soru bağlamına eklenerek Planner, Worker ve Judge aşamalarına taşınır. Bu bilgiler analiz için OpenAI ile paylaşılır; teknik JSON ve örnek satırlar Google Docs raporuna eklenmez.
+- Dosya adı, sütun profili ve ilk 10 satır soru bağlamına eklenerek Planner, Worker ve Judge aşamalarına taşınır. Bu bilgiler analiz için OpenAI ile paylaşılır; teknik JSON ve örnek satırlar Google Docs raporuna eklenmez.
 - Büyük hücreler nedeniyle bağlam 24000 karakteri aşarsa işlem açıklayıcı bir hata ile durur.
 - Destek talepleri için `cozum_saat`, `sla_hedef_saat`, `yeniden_acildi` (0/1) ve `memnuniyet_1_5` (1–5 veya boş) sütunları doğrulanırsa tam dosyada hedefe uyum, medyan, eksik puan senaryosu ve mevcut `modul`/`oncelik`/`yeniden_acildi` grupları hesaplanır. 30 grubu aşan kırılımlar atlanır. Farklı şemalar genel sütun profiliyle çalışır; yeni alan adları ve iş kuralları için uyarlayıcı eklenmelidir. Örnek satırlar tek başına tam dosya grup sonuçlarını veya nedenleri kanıtlamaz.
 - Nihai sonuç kısa yönetici kararı, kritik göstergeler, öncelikli eylemler ve metinsel çözüm diyagramı olarak istenir. Docs çıktısı bu sonucu ve varsa karar belirsizliklerini içerir; bağımsız uzman cevapları web arayüzünde ayrı kalır. Modelin uzunluk ve biçim talimatlarına uyması mutlak garanti değildir.
@@ -144,7 +90,7 @@ sonra uzmanları çalıştırın. Soru olmadan tablo analizi başlatılmaz.
 ```mermaid
 flowchart LR
     CSV[CSV dosyası] --> Parse[Ayırıcı ve başlık kontrolü]
-    Parse --> Preview[Önizleme ve sütun açıklamaları]
+    Parse --> Preview[Tablo önizlemesi]
     Preview --> Stats[Tüm dosya istatistikleri]
     Stats --> Question[Soru ve tablo bağlamı]
     Question --> Planner

@@ -63,38 +63,24 @@ export default function Setup({ onStatus }: {
   const ready = status.configured && status.connected && !status.installing;
   return <section className={`setup-panel${ready ? " setup-ready" : ""}`} aria-live="polite">
     <h2>{ready ? "Sistem hazır" : "İlk kurulum"}</h2>
-    <p>{status.configured
-      ? status.connected ? "OpenAI bağlantısı yapılandırıldı. Sorunuzu veya CSV tablonuzu değerlendirebilirsiniz." : "Servis başlatılıyor. Bağlantı otomatik kontrol ediliyor."
-      : "OpenAI API anahtarınızı girin. Sekiz iş akışı ve bağlantıları otomatik kurulur. Kurulum tamamlandığında değerlendirmeye başlayabilirsiniz."}</p>
+    {status.configured && !status.connected && <p>Servis başlatılıyor…</p>}
     {status.ownerSetupRequired && <p className="owner-setup-notice">
-      Önce <a href={status.editorUrl || "http://localhost:5680"} target="_blank" rel="noreferrer">n8n yönetici hesabınızı oluşturun</a>.
-      Hesap kurulumu tamamlandığında anahtar girişi etkinleşir.
+      <a href={status.editorUrl || "http://localhost:5680"} target="_blank" rel="noreferrer">n8n yönetici hesabı oluştur</a>
     </p>}
     {!status.configured && <form onSubmit={configure}>
       <label htmlFor="setup-key">OpenAI API anahtarı</label>
-      <input id="setup-key" type="password" autoComplete="off" spellCheck={false} autoCapitalize="none" aria-describedby="key-usage" value={apiKey}
+      <input id="setup-key" type="password" autoComplete="off" spellCheck={false} autoCapitalize="none" value={apiKey}
         onChange={event => setApiKey(event.target.value)} disabled={saving || status.installing || status.ownerSetupRequired} required placeholder="sk-…" />
-      <small id="key-usage">Anahtar gönderildiğinde giriş alanı temizlenir. Anahtar doğrulaması model listesini okur. Test sorusu çalıştırmak API kullanım ücreti oluşturur.</small>
       <button className="primary-button" disabled={!apiKey.trim() || saving || status.installing || !status.connected || status.ownerSetupRequired}>
         {saving || status.installing ? "İş akışları kuruluyor…" : "Kurulumu tamamla"}
       </button>
     </form>}
     {(error || status.error) && <p role="alert">{error || status.error}</p>}
-    <GoogleDocsSetup status={status} />
-
+    <div className="docs-settings" aria-label="Kurulum belgeleri">
+      <a href="/docs/openai.txt"
+        target="_blank" rel="noreferrer">OpenAI kurulum belgesi</a>
+      <a id="google-docs-setup" href="/docs/google-docs.txt"
+        target="_blank" rel="noreferrer">Google Docs kurulum belgesi</a>
+    </div>
   </section>;
-}
-
-function GoogleDocsSetup({ status }: { status: SetupStatus | null }) {
-  if (!status?.enabled) return null;
-  return <div className="docs-settings" aria-label="Google Docs bağlantısı">
-    <details id="google-docs-setup">
-      <summary>{status.docsEnabled ? "Google Docs açık" : "Google Docs kurulumu"}</summary>
-      {status.docsEnabled ? <p>Önce bir değerlendirmeyi tamamlayın. Ardından Nihai sonuç bölümündeki <b>Google Docs’a kaydet</b> düğmesini kullanın. <a href={status.editorUrl || "http://localhost:5680"} target="_blank" rel="noreferrer">Bağlantıları yönet</a></p> : <>
-      <p><a href={status.editorUrl || "http://localhost:5680"} target="_blank" rel="noreferrer">n8n yönetimini açın</a> ve ilk kullanımda yönetici hesabınızı oluşturun.
-        Google Drive ve Google Docs OAuth2 bağlantılarını ekleyin. “Multi-Agent UI - Google Docs API” iş akışındaki Drive/Docs düğümlerinde bu bağlantıları ve hedef klasörü seçip iş akışını yayınlayın.</p>
-      <p>Ardından terminalde <code>GOOGLE_DOCS_ENABLED=true bash scripts/start.sh</code> çalıştırın. Google Docs için Google Cloud OAuth yapılandırması gerekir.</p>
-      </>}
-    </details>
-  </div>;
 }

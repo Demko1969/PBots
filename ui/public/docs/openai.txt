@@ -1,0 +1,16 @@
+OpenAI bağlantısı
+
+Docker kurulumunda önce yerel n8n sahibi hesabını oluşturun. Ardından
+uygulamanın kurulum ekranına OpenAI API anahtarınızı girin. Kurulum anahtarı
+n8n credential deposuna aktarır ve ayrıca yerel webhook erişim anahtarı üretir.
+
+Elle kurulumda OpenAI anahtarını n8n'de Authorization başlıklı bir Header Auth
+credential olarak kaydedin. Planner, Worker ve Judge içindeki dört OpenAI
+isteğinde bu credential'ı seçin. Dört UI webhook'u ayrı bir
+X-Multi-Agent-Key Header Auth credential gerektirir. Eşleşen webhook anahtarı
+UI sunucusunun özel ui/.env.local dosyasına girilir.
+
+Soru, CSV örnekleri ve analiz bağlamı OpenAI ile paylaşılır. JPG, PNG ve PDF
+eklerinin tamamı inceleme için gönderilir. Gerçek değerlendirmeler OpenAI API
+kullanımı oluşturur. Tam adımlar için proje içindeki deployment/README.md
+ve veri saklama bilgileri için SECURITY.md dosyasına bakın.

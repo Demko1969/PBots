@@ -1,13 +1,16 @@
 # Ortak Akıl Web Arayüzü
 
-Bu klasör çoklu uzman n8n workflow'larının web arayüzünü içerir.
+Docker kurulumu için [ana kılavuza](../README.md), mevcut bir yerel n8n ile
+çalıştırmak için [elle kurulum adımlarına](../deployment/README.md#standalone-with-an-existing-local-n8n)
+bakın. Git'te izlenen ortam şablonu proje kökündeki `.env.example` dosyasıdır.
+Elle kurulumda onu `ui/.env.local` olarak kopyalayın ve yalnızca sunucunun
+kullandığı n8n webhook anahtarını ekleyin.
+
+Yerel doğrulama
 
 ```sh
-cp .env.example .env.local
-pnpm install
-pnpm dev
+pnpm install --frozen-lockfile
+npm test
+npm run lint
+pnpm exec tsc --noEmit --incremental false
 ```
-
-Varsayılan olarak `http://127.0.0.1:5678/webhook` adresindeki n8n webhook'larına sunucu üzerinden bağlanır. Dört `Multi-Agent UI - ... API` workflow'unun n8n içinde import edilmiş, alt-workflow seçimlerinin yapılmış ve aktif olması gerekir.
-
-Ana proje kurulumu ve Google Docs adımları için üst dizindeki `README.md` dosyasını kullanın.

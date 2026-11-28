@@ -74,6 +74,22 @@ while IFS='|' read -r workflow_id filename; do
       throw new Error(`Expected exactly one exported workflow in ${file}`);
     }
     const workflow = exported[0];
+    for (const node of workflow.nodes ?? []) {
+      if (node.type === "n8n-nodes-base.webhook") {
+        if (node.parameters?.authentication !== "headerAuth") {
+          throw new Error("Every UI webhook must require Header Auth before sync.");
+        }
+        if (node.credentials) delete node.credentials.httpHeaderAuth;
+      }
+      if (node.type === "@n8n/n8n-nodes-langchain.chatTrigger") {
+        node.parameters.public = false;
+        node.parameters.authentication = "n8nUserAuth";
+      }
+    }
+    workflow.active = false;
+    workflow.pinData = {};
+    workflow.staticData = null;
+    for (const key of ["shared", "meta", "activeVersionId"]) delete workflow[key];
     const unauthenticatedOpenAiNodes = (workflow.nodes ?? []).filter((node) => {
       if (node.type !== "n8n-nodes-base.httpRequest") return false;
       if (node.parameters?.url !== "https://api.openai.com/v1/responses") return false;

@@ -8,5 +8,12 @@ ui/dist
 ui/.wrangler
 ui/.next
 ui/.vinext
+ui/outputs
+ui/work
 **/*.tsbuildinfo
 **/.DS_Store
+**/*.sqlite*
+**/*.db
+**/*.zip
+**/*.pem
+**/*.key
