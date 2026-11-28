@@ -1,11 +1,7 @@
 .demo-robot-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .demo-notice {
-  display: flex;
-  justify-content: space-between;
-  gap: .5rem 1rem;
-  flex-wrap: wrap;
   padding: .65rem 1rem;
   color: var(--muted);
   font-size: .875rem;
 }
-.demo-notice a { text-decoration: underline; text-underline-offset: .2em; }
+.demo-settings-note { margin: 0; color: var(--muted); font-size: .875rem; }

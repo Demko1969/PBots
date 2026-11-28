@@ -63,7 +63,8 @@ export async function appRequest(url: string, options?: RequestInit): Promise<Re
   });
   const question = String(body.question);
   const followUp = question.includes(scenario.followUp);
-  const result = { question, model: "gpt-5-mini", questionType: "ERP destek analizi", complexity: "medium", agentCount: agents.length };
+  const model = typeof body.openaiModel === "string" ? body.openaiModel : "gpt-5-mini";
+  const result = { question, model, openaiModel: model, questionType: "ERP destek analizi", complexity: "medium", agentCount: agents.length };
   if (stage === "plan") return Response.json({ ...result, agents });
   if (stage === "worker") {
     const index = Number(body.agentId) - 1;
