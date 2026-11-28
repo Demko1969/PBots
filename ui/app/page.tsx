@@ -1464,7 +1464,7 @@ function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
       <header className="topbar">
         <div className="brand">
           <Image className="brand-logo" src={brandLogo} width={44} height={44} alt="" priority unoptimized />
-          <span className="brand-name">Ortak Akıl</span>
+          <span className="brand-name">PBots</span>
         </div>
         <LanguageSelect />
       </header>

@@ -210,7 +210,7 @@ export const scenario: DemoScenario = {
   question: questions[0],
   followUps: questions.slice(1).map((question, index) => ({ question, attachment: index === 1 ? screenshot : undefined })),
   model: { id: "gpt-5-mini", label: "GPT-5 mini" },
-  installationUrl: "https://github.com/Demko1969/ortak-akil/blob/main/deployment/README.md",
+  installationUrl: "https://github.com/Demko1969/PBots/blob/main/deployment/README.md",
   expertCount: prompt => byQuestion.get(prompt)?.turn.experts.length ?? 0,
   csv,
   download: "data:text/csv;charset=utf-8," + encodeURIComponent(csv.text),

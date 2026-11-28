@@ -1,6 +1,6 @@
 # Ortak Akıl · Multi-Expert Workspace
 
-**[Try the browser demo on GitHub Pages](https://demko1969.github.io/ortak-akil/)**
+**[Try the browser demo on GitHub Pages](https://demko1969.github.io/PBots/)**
 
 Use the **English · Français · Türkçe** selector, then submit the prepared ERP support question. Three specialists examine the same 20-ticket sample from different angles: SLA breaches, reopened tickets, and the slow first responses of critical tickets. Select each expert’s robot to read their findings, return to the final recommendation, and open the solution diagram.
 
@@ -13,8 +13,8 @@ The local app accepts your own questions, CSVs, images, and PDFs. A Planner assi
 Start Docker Desktop or Docker Engine with Compose. On Windows, use Linux containers.
 
 ```sh
-git clone https://github.com/Demko1969/ortak-akil.git
-cd ortak-akil
+git clone https://github.com/Demko1969/PBots.git
+cd PBots
 bash scripts/start.sh
 ```
 
