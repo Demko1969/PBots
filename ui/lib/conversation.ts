@@ -55,23 +55,24 @@ export function conversationPrompt(question: string, turns: ConversationRun[], a
   }
 
   const csvMarker = "\n\nCSV analysis context\n";
-  let evidence = attachmentEvidence;
-  if (!evidence) {
-    for (const turn of turns.slice().reverse()) {
-      if (turn.attachmentEvidence) {
-        evidence = turn.attachmentEvidence;
-        break;
-      }
+  const mediaMarker = "\n\nDosya eki kanıtı";
+  let csv = attachmentEvidence.startsWith(csvMarker) ? attachmentEvidence : "";
+  let media = attachmentEvidence && !csv ? attachmentEvidence : "";
+  for (const turn of turns.slice().reverse()) {
+    const stored = turn.attachmentEvidence;
+    if (stored?.startsWith(csvMarker)) csv ||= stored;
+    else if (stored) media ||= stored;
+    if (!csv) {
       const source = turn.followUpPrompt ?? turn.result?.question ?? "";
       const csvIndex = source.indexOf(csvMarker);
-      if (csvIndex === -1) continue;
-      evidence = source.slice(csvIndex);
-      break;
+      const mediaIndex = source.indexOf(mediaMarker, csvIndex + csvMarker.length);
+      if (csvIndex !== -1) csv = source.slice(csvIndex, mediaIndex === -1 ? undefined : mediaIndex);
     }
+    if (csv && media) break;
   }
   return [
     "Aşağıdaki soru ve yanıtlar sohbet geçmişidir. Yalnızca güncel soruyu yanıtla. Belirsiz göndermelerde son soru ve yanıtı temel al. Kullanıcı daha eski bir noktaya açıkça gönderme yapıyorsa ilgili konuşmayı da kullan.",
     `Sohbet geçmişi (eskiden yeniye): [${messages.join(",\n")}]`,
-    `Güncel soru:\n${question}${evidence}`,
+    `Güncel soru:\n${question}${csv}${media}`,
   ].join("\n\n");
 }

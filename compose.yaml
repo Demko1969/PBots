@@ -12,6 +12,7 @@ services:
       - "127.0.0.1:${N8N_EDITOR_PORT:-5680}:5678"
     environment:
       N8N_SSRF_PROTECTION_ENABLED: "true"
+      N8N_SSRF_ALLOWED_IP_RANGES: 127.0.0.1/32
       N8N_COMMUNITY_PACKAGES_ENABLED: "false"
       N8N_PUBLIC_API_DISABLED: "true"
       N8N_TEMPLATES_ENABLED: "false"

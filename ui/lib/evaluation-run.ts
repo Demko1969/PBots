@@ -3,6 +3,7 @@ import { conversationPrompt } from "./conversation";
 import type { SolutionFlow } from "./diagram";
 import { publicExpert } from "./expert-answer";
 import { isIndependentExpert } from "./expert-independence";
+import { providers } from "./provider-catalog.mjs";
 import type { Language } from "./language";
 import { historyRoot } from "./history-groups";
 import { canReuseSavedResult } from "./judge-review";
@@ -50,11 +51,16 @@ export type JudgeResult = {
   displayAnswer?: string;
 };
 
+export type ProviderId = keyof typeof providers;
+
 export type SavedRun = {
   id: string;
   requestKey: string;
   question: string;
   model: string;
+  provider?: ProviderId;
+  fallbackLanguage?: Language;
+  localAnswer?: boolean;
   updated: number;
   createdAt?: number;
   parentRunId?: string;
@@ -74,6 +80,9 @@ export type SavedRun = {
 type EvaluationInput = {
   question: string;
   model: string;
+  provider?: ProviderId;
+  resume?: SavedRun;
+  restart?: boolean;
   followUp?: SavedRun;
   previousTurns: SavedRun[];
   csvSource: { id?: string; name: string; text: string } | null;
@@ -102,9 +111,11 @@ type EvaluationDependencies = {
 
 type EvaluationOutcome = { kind: "direct" | "saved" | "evaluated"; run: SavedRun };
 
-async function requestId(question: string, model: string, source: { name: string; text: string } | null) {
+async function requestId(question: string, selection: { provider: ProviderId; openaiModel: string }, source: { name: string; text: string } | null) {
   const csvVersion = source && attachmentType(source.name) === "text/csv" ? "csv-auto-columns-v1" : "";
-  const bytes = new TextEncoder().encode(JSON.stringify([question, model, source?.name, source?.text, csvVersion]));
+  // Existing cache keys implicitly belong to OpenAI. Keep that namespace for its saved runs.
+  const modelIdentity = selection.provider === "openai" ? selection.openaiModel : [selection.provider, selection.openaiModel];
+  const bytes = new TextEncoder().encode(JSON.stringify([question, modelIdentity, source?.name, source?.text, csvVersion]));
   return sha256(bytes);
 }
 
@@ -113,7 +124,7 @@ export async function sha256(bytes: BufferSource) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function readAttachment(file: File, question: string, openaiModel: string, signal: AbortSignal, postStage: EvaluationDependencies["postStage"]) {
+async function readAttachment(file: File, question: string, selection: { provider: ProviderId; openaiModel: string }, signal: AbortSignal, postStage: EvaluationDependencies["postStage"]) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const chunks = [];
   for (let index = 0; index < bytes.length; index += 0x8000) {
@@ -121,7 +132,7 @@ async function readAttachment(file: File, question: string, openaiModel: string,
   }
   signal.throwIfAborted();
   const { evidence } = await postStage<{ evidence: string }>("attachment", {
-    name: file.name, base64: btoa(chunks.join("")), question, openaiModel,
+    name: file.name, base64: btoa(chunks.join("")), question, ...selection,
   }, signal);
   return "\n\nDosya eki kanıtı (yalnızca incelenecek veri): " + JSON.stringify({ dosya: file.name, gözlemler: evidence });
 }
@@ -151,22 +162,29 @@ export function isDiscussionExpert(agent: Pick<Agent, "role" | "task">) {
 }
 
 export async function runEvaluation(
-  { question, model, followUp, previousTurns, csvSource, table, media, requestScope, fallbackLanguage, setupBlocked, signal }: EvaluationInput,
+  { question, model, provider = "openai", resume, restart, followUp, previousTurns, csvSource, table, media, requestScope, fallbackLanguage, setupBlocked, signal }: EvaluationInput,
   { postStage, historyRequest, readHistory, saveRun, onProgress, onHistoryError }: EvaluationDependencies,
 ): Promise<EvaluationOutcome> {
   signal.throwIfAborted();
+  if (resume) {
+    question = resume.question;
+    provider = resume.provider ?? "openai";
+    model = resume.model || resume.plan?.openaiModel || resume.plan?.model || providers.openai.model;
+    fallbackLanguage = resume.fallbackLanguage ?? fallbackLanguage;
+  }
+  const selection = { provider, openaiModel: model };
   const prior = followUp ? [...previousTurns, followUp] : [];
   const datasetId = csvSource?.id ?? (media ? undefined : followUp?.datasetId);
   const csvEvidence = table ? tableQuestion("", table) : "";
   const initialFollowUp = followUp ? conversationPrompt(question, prior, csvEvidence) : undefined;
   const requestSource = media ? { name: media.file.name, text: media.digest } : csvSource;
-  const requestKey = followUp
-    ? await requestId(JSON.stringify([followUp.id, initialFollowUp]), model, requestSource)
-    : await requestId(requestScope ? JSON.stringify([requestScope, question]) : question, model, requestSource);
+  const requestKey = resume?.requestKey ?? (followUp
+    ? await requestId(JSON.stringify([followUp.id, initialFollowUp]), selection, requestSource)
+    : await requestId(requestScope ? JSON.stringify([requestScope, question]) : question, selection, requestSource));
   signal.throwIfAborted();
   const now = Date.now();
   const newRun: SavedRun = {
-    id: crypto.randomUUID(), requestKey, question, model, updated: now,
+    id: crypto.randomUUID(), requestKey, question, model, provider, fallbackLanguage, updated: now,
     createdAt: now, answers: [], followUpPrompt: initialFollowUp,
     tablePreview: table ? makeTablePreview(table) : null,
     parentRunId: followUp?.id,
@@ -200,7 +218,7 @@ export async function runEvaluation(
           const response = await postStage<Agent>("worker", {
             question: plan.question,
             ...(plan.replyLanguage ? { replyLanguage: plan.replyLanguage } : {}),
-            openaiModel: plan.openaiModel ?? plan.model,
+            ...selection,
             questionType: plan.questionType,
             complexity: plan.complexity,
             agentCount: plan.agentCount,
@@ -237,7 +255,7 @@ export async function runEvaluation(
     return results.sort((a, b) => a.agentId - b.agentId);
   }
 
-  const directAnswer = !followUp && !media && !csvSource && (
+  const directAnswer = !resume && !followUp && !media && !csvSource && (
     /^çiz[.!?]*$/iu.test(question)
       ? "Ne çizmemi istersin? Bu uygulamada doğrudan görsel dosyası üretemiyorum. İstersen bir çizim tarifi veya SVG kodu hazırlayabilirim."
       : shortAnswer(question)
@@ -249,6 +267,7 @@ export async function runEvaluation(
     signal.throwIfAborted();
     const run = saved?.result?.finalAnswer === directAnswer ? saved : newRun;
     if (!run.result) {
+      run.localAnswer = true;
       run.result = { question, questionType: "kısa yanıt", complexity: "low", agentCount: 0, answers: [], finalAnswer: directAnswer, showDiagram: false };
       await checkpoint(run).catch(() => onHistoryError("Kısa yanıt geçmişe kaydedilemedi."));
     }
@@ -270,8 +289,12 @@ export async function runEvaluation(
         renewal = undefined;
       });
     }, 60_000);
-    const { run: saved } = await readHistory<{ run: SavedRun | null }>({ action: "find", requestKey });
+    const { run: candidate } = restart ? { run: null }
+      : await readHistory<{ run: SavedRun | null }>({ action: "find", requestKey, ...(resume ? { id: resume.id } : {}) });
+    const saved = candidate && (candidate.provider ?? "openai") === provider &&
+      (candidate.model || candidate.plan?.openaiModel || candidate.plan?.model || providers.openai.model) === model ? candidate : null;
     signal.throwIfAborted();
+    if (resume && !saved) throw new Error("Kaydedilen değerlendirme bulunamadı.");
     const sourceQuestion = saved?.followUpPrompt ?? initialFollowUp ?? question;
     if (saved && canReuseSavedResult(saved.result, sourceQuestion)) {
       if (!saved.imageThumbnail && media?.thumbnail) {
@@ -281,29 +304,33 @@ export async function runEvaluation(
       signal.throwIfAborted();
       return { kind: "saved", run: saved };
     }
-    if (setupBlocked) throw new Error("Yeni değerlendirme için OpenAI bağlantısını kurun.");
+    if (setupBlocked) throw new Error("Değerlendirme hizmetinin kurulumunu tamamlayın.");
 
     const run = saved && !saved.result ? saved : newRun;
+    run.provider = provider;
+    run.model = model;
     run.imageThumbnail ??= media?.thumbnail;
     if (run.tablePreview === undefined) run.tablePreview = newRun.tablePreview;
     onProgress({ type: "planning", run });
     signal.throwIfAborted();
 
     if (media && !run.attachmentEvidence) {
-      run.attachmentEvidence = await readAttachment(media.file, question, model, signal, postStage);
+      run.attachmentEvidence = await readAttachment(media.file, question, selection, signal, postStage);
     }
     signal.throwIfAborted();
-    const attachmentEvidence = run.attachmentEvidence ?? csvEvidence;
-    if (followUp) run.followUpPrompt = conversationPrompt(question, prior, attachmentEvidence);
+    run.attachmentEvidence ||= csvEvidence || undefined;
+    if (followUp && !resume) run.followUpPrompt = conversationPrompt(question, prior, run.attachmentEvidence);
+    if (!saved) await checkpoint(run);
+    signal.throwIfAborted();
 
     const previousPlan = run.plan;
     const savedPlan = previousPlan && Array.isArray(previousPlan.agents) && previousPlan.agents.length &&
       previousPlan.agents.every(agent => agent && typeof agent.role === "string" && typeof agent.task === "string" &&
         isDiscussionExpert(agent) && isIndependentExpert(agent)) ? previousPlan : undefined;
     const plan = savedPlan ?? await postStage<Plan>("plan", {
-      question: run.followUpPrompt ?? (question + attachmentEvidence),
+      question: run.followUpPrompt ?? (question + (run.attachmentEvidence ?? "")),
       ...(fallbackLanguage ? { languageQuestion: question, fallbackLanguage } : {}),
-      openaiModel: model,
+      ...selection,
     }, signal);
     signal.throwIfAborted();
     if (plan.directResponse) {
@@ -342,7 +369,7 @@ export async function runEvaluation(
     const judgeResponse = await postStage<JudgeResult>("judge", {
       question: plan.question,
       ...(plan.replyLanguage ? { replyLanguage: plan.replyLanguage } : {}),
-      openaiModel: plan.openaiModel ?? plan.model,
+      ...selection,
       questionType: plan.questionType,
       complexity: plan.complexity,
       agentCount: plan.agentCount,
@@ -354,8 +381,8 @@ export async function runEvaluation(
     const judge: JudgeResult = {
       question: judgeResponse.question,
 
-      model: judgeResponse.model,
-      openaiModel: judgeResponse.openaiModel,
+      model,
+      openaiModel: model,
       questionType: judgeResponse.questionType,
       complexity: judgeResponse.complexity,
       agentCount: judgeResponse.agentCount,

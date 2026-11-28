@@ -66,14 +66,17 @@ while IFS='|' read -r workflow_id filename; do
 
   # n8n CLI exports a JSON array. Repository workflow files contain one JSON
   # object each, so unwrap the single requested workflow and reject surprises.
-  node -e '
-    const fs = require("fs");
+  node --input-type=module -e '
+    import fs from "node:fs";
+    import { pathToFileURL } from "node:url";
+    const { restoreProviderRequests } = await import(pathToFileURL(process.argv[2]));
     const file = process.argv[1];
     const exported = JSON.parse(fs.readFileSync(file, "utf8"));
     if (!Array.isArray(exported) || exported.length !== 1) {
       throw new Error(`Expected exactly one exported workflow in ${file}`);
     }
     const workflow = exported[0];
+    restoreProviderRequests(workflow);
     for (const node of workflow.nodes ?? []) {
       if (node.type === "n8n-nodes-base.webhook") {
         if (node.parameters?.authentication !== "headerAuth") {
@@ -106,7 +109,7 @@ while IFS='|' read -r workflow_id filename; do
       );
     }
     fs.writeFileSync(file, `${JSON.stringify(workflow, null, 2)}\n`);
-  ' "${staged_output}"
+  ' "${staged_output}" "${REPO_ROOT}/deployment/workflows.mjs"
 done <<< "${WORKFLOWS}"
 
 # Commit the complete staged set only after all eight exports succeed.
