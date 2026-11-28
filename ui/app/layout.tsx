@@ -7,22 +7,22 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") || requestHeaders.get("host") || "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
   const imageUrl = `${protocol}://${host}/og.png`;
-  const description = "Soruları bağımsız yapay zekâ uzmanlarına dağıtan ve görüşleri tek bir sonuçta birleştiren çalışma alanı.";
+  const description = "A workspace that assigns questions to independent AI experts and combines their findings into one answer.";
 
   return {
-    title: "Ortak Akıl — Çoklu Uzman Karar Alanı",
+    title: "Ortak Akıl — Multi-Expert Workspace",
     description,
     icons: { icon: "/ortak-akil-lens.svg", shortcut: "/ortak-akil-lens.svg" },
     openGraph: {
       title: "Ortak Akıl",
       description,
       type: "website",
-      images: [{ url: imageUrl, width: 1200, height: 630, alt: "Ortak Akıl — Çoklu uzman karar alanı" }],
+      images: [{ url: imageUrl, width: 1200, height: 630, alt: "Ortak Akıl — Multi-expert workspace" }],
     },
     twitter: { card: "summary_large_image", title: "Ortak Akıl", description, images: [imageUrl] },
   };
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="tr"><body>{children}</body></html>;
+  return <html lang="en"><body>{children}</body></html>;
 }
