@@ -10,7 +10,9 @@ different boundaries. Neither provides separate user accounts for UI history.
    containers and run `scripts/start.cmd`. On macOS or Linux run
    `bash scripts/start.sh` from the checkout.
 2. Open the [local UI](http://localhost:3000). Follow the setup link and create
-   the n8n owner account. Return to the UI and enter your OpenAI API key.
+   the n8n owner account. Return to the UI and enter your OpenAI API key in
+   Settings. Use the language selector in the top bar to switch between
+   English, French, and Turkish.
 3. Setup creates a separate random webhook token, imports eight workflows and
    publishes the three analysis webhooks and their three sub-workflows. Run the
    example question to verify model access. Setup's key check reads the model

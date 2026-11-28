@@ -88,3 +88,9 @@ test("explains the missing return edge in a requested pilot retest flow", () => 
   pilotEdges[4].to = "test";
   assert.equal(diagramValidationIssue({ nodes: pilotNodes, edges: pilotEdges }, "branches", 2, true), undefined);
 });
+
+test("recognizes French and English requests for a solution diagram", () => {
+  assert.equal(diagramPreference("Montre-moi un diagramme de solution."), "requested");
+  assert.equal(diagramPreference("Explique la démarche sans schéma."), "declined");
+  assert.equal(diagramPreference("Include a solution diagram."), "requested");
+});

@@ -1,12 +1,16 @@
-# Ortak Akıl Web Arayüzü
+# Ortak Akıl web app
 
-Docker kurulumu için [ana kılavuza](../README.md), mevcut bir yerel n8n ile
-çalıştırmak için [elle kurulum adımlarına](../deployment/README.md#standalone-with-an-existing-local-n8n)
-bakın. Git'te izlenen ortam şablonu proje kökündeki `.env.example` dosyasıdır.
-Elle kurulumda onu `ui/.env.local` olarak kopyalayın ve yalnızca sunucunun
-kullandığı n8n webhook anahtarını ekleyin.
+See the [main guide](../README.md) for Docker or the [manual installation
+steps](../deployment/README.md#standalone-with-an-existing-local-n8n)
+to use an existing local n8n instance. For manual setup, copy the root
+`.env.example` template to `ui/.env.local` and set the server-side n8n webhook
+credential there.
 
-Yerel doğrulama
+The web interface supports English, French, and Turkish. The AI can answer in
+a different language from the interface. See the [technical language
+contract](../PROJECT_SPEC.md#language) and the [browser demo guide](demo/README.md).
+
+## Verify locally
 
 ```sh
 pnpm install --frozen-lockfile
