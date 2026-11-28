@@ -1,6 +1,6 @@
 # Ortak Akıl browser demo
 
-The [GitHub Pages demo](https://demko1969.github.io/ortak-akil/) uses the main
+The [GitHub Pages demo](https://demko1969.github.io/PBots/) uses the main
 chat interface and a prepared ERP support scenario. Choose English, French, or
 Turkish in the top bar. You can switch languages during the conversation and
 stay on the same turn.
@@ -38,4 +38,4 @@ The Pages workflow builds and tests the demo on pull requests. To publish,
 set **Settings → Pages → Source → GitHub Actions** in `Demko1969/ortak-akil`.
 After merging the workflow into the default branch, run **Actions → Ortak Akıl
 web demo → Run workflow** on that branch and verify the [Pages
-site](https://demko1969.github.io/ortak-akil/).
+site](https://demko1969.github.io/PBots/).
