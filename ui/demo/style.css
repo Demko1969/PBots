@@ -1,6 +1,5 @@
 .demo-robot-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 
-.demo-model-value { color: var(--ink); font-weight: 650; }
 .demo-csv-header { display: flex; align-items: center; gap: .5rem; }
 .demo-csv-header p { margin: 0; }
 .demo-csv-download {

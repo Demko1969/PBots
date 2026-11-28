@@ -4,7 +4,11 @@ import { spawn } from 'node:child_process';
 import { readFile, writeFile, mkdtemp, rename, rm, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WORKFLOW_FILES, CORE_WORKFLOW_IDS, PUBLISHED_IDS, OPENAI_CREDENTIAL_ID, WEBHOOK_CREDENTIAL_ID, secureWebhooks, prepareWorkflow } from './workflows.mjs';
+import { WORKFLOW_FILES, CORE_WORKFLOW_IDS, PUBLISHED_IDS, OPENAI_CREDENTIAL_ID, WEBHOOK_CREDENTIAL_ID, secureWebhooks, prepareWorkflow, routeProviderRequests } from './workflows.mjs';
+
+import { isProvider, providerForModel } from '../ui/lib/provider-catalog.mjs';
+import { generate, ProviderError, testProvider } from './provider-adapters.mjs';
+import { openProviderSettings, validProviderKey } from './provider-settings.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const marker = '/home/node/.n8n/ortak-akil-installed.json';
@@ -16,6 +20,8 @@ if (!/^[a-f0-9]{64}$/.test(internalToken)) throw new Error('Internal access toke
 const webhookCredential = { id: WEBHOOK_CREDENTIAL_ID, name: 'Ortak Akıl internal access', type: 'httpHeaderAuth', data: { name: 'X-Multi-Agent-Key', value: internalToken } };
 const assessmentVersion = 17;
 const authVersion = 2;
+const providerVersion = 1;
+const providerSettings = await openProviderSettings('/home/node/.n8n/pbots-providers.json', internalToken);
 let configured = await access(marker).then(() => true, () => false);
 let installing = false;
 let shuttingDown = false;
@@ -80,22 +86,14 @@ async function ownerSetupRequired() {
   } catch { return true; }
 }
 
-async function install(apiKey) {
+async function install() {
   const directory = await mkdtemp('/tmp/ortak-akil-');
   try {
     await stopN8n();
-    const credentials = [webhookCredential, { id: OPENAI_CREDENTIAL_ID, name: 'OpenAI API', type: 'httpHeaderAuth', data: { name: 'Authorization', value: `Bearer ${apiKey}` } }];
     const credentialsFile = join(directory, 'credentials.json');
-    await writeFile(credentialsFile, JSON.stringify(credentials), { mode: 0o600 });
+    await writeFile(credentialsFile, JSON.stringify([webhookCredential]), { mode: 0o600 });
     await cli(['import:credentials', `--input=${credentialsFile}`]);
     await rm(credentialsFile);
-    const exportedCredentials = join(directory, 'credential-check.json');
-    await cli(['export:credentials', `--id=${OPENAI_CREDENTIAL_ID}`, `--output=${exportedCredentials}`]);
-    const savedCredentials = JSON.parse(await readFile(exportedCredentials, 'utf8'));
-    if (savedCredentials.length !== 1 || savedCredentials[0].id !== OPENAI_CREDENTIAL_ID || typeof savedCredentials[0].data !== 'string') {
-      throw new Error('Credential import verification failed. Retry setup.');
-    }
-    await rm(exportedCredentials);
     const workflows = await Promise.all(WORKFLOW_FILES.map(async name => prepareWorkflow(JSON.parse(await readFile(join(root, 'workflows', name), 'utf8')))));
     const workflowsFile = join(directory, 'workflows.json');
     await writeFile(workflowsFile, JSON.stringify(workflows), { mode: 0o600 });
@@ -109,7 +107,7 @@ async function install(apiKey) {
       throw new Error('Workflow installation verification failed. Retry setup.');
     }
     // Only mark complete after every import and publication has succeeded.
-    await writeInstallation({ installedAt: new Date().toISOString(), workflowCount: 8, authVersion, pipelineVersion: 1, assessmentVersion });
+    await writeInstallation({ installedAt: new Date().toISOString(), workflowCount: 8, authVersion, pipelineVersion: 1, assessmentVersion, providerVersion });
     configured = true;
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -227,6 +225,63 @@ if (configured) {
   }
 }
 
+// Keep published workflow IDs and migrate the existing OpenAI key before switching the transport.
+if (configured) {
+  const installation = JSON.parse(await readFile(marker, 'utf8'));
+  if (installation.providerVersion !== providerVersion) {
+    const directory = await mkdtemp('/tmp/pbots-providers-');
+    try {
+      if (!providerSettings.key('openai')) {
+        const credentials = join(directory, 'credentials.json');
+        await cli(['export:credentials', `--id=${OPENAI_CREDENTIAL_ID}`, '--decrypted', `--output=${credentials}`]);
+        const [credential] = JSON.parse(await readFile(credentials, 'utf8'));
+        await rm(credentials);
+        const value = credential?.data?.value;
+        if (typeof value !== 'string' || !value.startsWith('Bearer ') || !validProviderKey('openai', value.slice(7))) {
+          throw new Error('The installed OpenAI credential could not be migrated.');
+        }
+        await providerSettings.save('openai', value.slice(7));
+      }
+      const file = join(directory, 'workflows.json');
+      await cli(['export:workflow', '--all', `--output=${file}`]);
+      const workflows = JSON.parse(await readFile(file, 'utf8')).filter(routeProviderRequests);
+      if (workflows.length !== CORE_WORKFLOW_IDS.length) throw new Error('Missing provider workflows.');
+      const { providerUpgradePublished, ...installed } = installation;
+      const published = providerUpgradePublished ?? workflows.filter(workflow => workflow.active).map(workflow => workflow.id);
+      if (!providerUpgradePublished) await writeInstallation({ ...installed, providerUpgradePublished: published });
+      for (const workflow of workflows) {
+        for (const field of ['shared', 'activeVersionId', 'createdAt', 'updatedAt']) delete workflow[field];
+        workflow.active = false;
+        workflow.versionId = randomUUID();
+      }
+      await writeFile(file, JSON.stringify(workflows), { mode: 0o600 });
+      await cli(['import:workflow', `--input=${file}`]);
+      for (const id of published) await cli(['publish:workflow', `--id=${id}`]);
+      await writeInstallation({ ...installed, providerVersion });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }
+}
+
+async function readBody(request, limit) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > limit) throw new ProviderError(413);
+    chunks.push(chunk);
+  }
+  const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ProviderError(400);
+  return data;
+}
+
+function providerFailure(status) {
+  if ([401, 403, 404].includes(status)) return 'API anahtarını ve bu modele erişiminizi kontrol edin.';
+  if ([402, 429].includes(status)) return 'Kota ve faturalandırma ayarlarınızı kontrol edin.';
+  if (status === 409) return 'Önce bir API anahtarı kaydedin.';
+  return 'Model yanıt vermedi. Bağlantıyı kontrol edip tekrar deneyin.';
+}
+
 startN8n();
 const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ready: true });
@@ -234,37 +289,61 @@ const server = createServer(async (request, response) => {
   if (typeof suppliedToken !== 'string' || !/^[a-f0-9]{64}$/.test(suppliedToken) ||
       !timingSafeEqual(Buffer.from(suppliedToken), Buffer.from(internalToken))) return json(response, 401, { error: 'Unauthorized.' });
   if (request.method === 'GET' && request.url === '/status') {
-    return json(response, 200, { configured, installing, connected: await ready(), ownerSetupRequired: await ownerSetupRequired(), error: lastError });
+    return json(response, 200, { configured, installing, connected: await ready(), ownerSetupRequired: await ownerSetupRequired(), error: lastError, ...providerSettings.status() });
+  }
+  if (request.method === 'POST' && request.url === '/generate') {
+    if (request.socket.remoteAddress !== '127.0.0.1') return json(response, 403, { error: 'Forbidden.' });
+    try {
+      const body = await readBody(request, 8 * 1024 * 1024);
+      const disconnect = new AbortController();
+      response.once('close', () => disconnect.abort());
+      const timeout = Array.isArray(body.input) ? 115_000 : 900_000;
+      const signal = AbortSignal.any([disconnect.signal, AbortSignal.timeout(timeout)]);
+      return json(response, 200, await generate(body, providerSettings.key(providerForModel(body.model)), signal));
+    } catch {
+      if (!response.destroyed) return json(response, 502, { error: 'Provider request failed.' });
+    }
+  }
+  if (request.method === 'POST' && request.url === '/providers') {
+    if (!configured || installing) return json(response, 409, { error: 'Önce kurulumu tamamlayın.' });
+    try {
+      const { provider, apiKey, action } = await readBody(request, 4096);
+      if (!isProvider(provider)) return json(response, 400, { error: 'Geçersiz sağlayıcı.' });
+      const key = apiKey === undefined ? providerSettings.key(provider) : apiKey;
+      if (action === 'default' && providerSettings.key(provider)) await providerSettings.setDefault(provider);
+      else if ((action === 'test' || action === 'save') && validProviderKey(provider, key)) {
+        await testProvider(provider, key, AbortSignal.timeout(20_000));
+        if (action === 'save') await providerSettings.save(provider, key);
+      } else return json(response, 400, { error: 'Geçerli bir API anahtarı girin.' });
+      return json(response, 200, providerSettings.status());
+    } catch (error) {
+      return json(response, 502, { error: providerFailure(error instanceof ProviderError ? error.status : 502) });
+    }
   }
   if (request.method !== 'POST' || request.url !== '/configure') return json(response, 404, { error: 'Unknown action.' });
-  if (configured) return json(response, 409, { error: 'Setup is already complete. Manage credentials in n8n.' });
+  if (configured) return json(response, 409, { error: 'Setup is already complete. Manage providers in Settings.' });
   if (installing) return json(response, 409, { error: 'Setup is already running.' });
   if (Date.now() - lastSetupAttempt < 10000) return json(response, 429, { error: 'Wait before retrying setup.' });
   if (!await ready()) return json(response, 503, { error: 'n8n is starting. Try again shortly.' });
   if (await ownerSetupRequired()) return json(response, 409, { error: 'Create your n8n owner account before entering the API key.' });
-  let text = '';
   try {
-    for await (const chunk of request) {
-      text += chunk;
-      if (Buffer.byteLength(text) > 4096) return json(response, 413, { error: 'Request is too large.' });
-    }
-    const body = JSON.parse(text);
+    const body = await readBody(request, 4096);
+    const provider = body.provider ?? 'openai';
     const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
-    if (!/^sk-[A-Za-z0-9_-]{16,}$/.test(apiKey) || apiKey.length > 512) return json(response, 400, { error: 'Enter a valid OpenAI API key.' });
+    if (!validProviderKey(provider, apiKey)) return json(response, 400, { error: 'Geçerli bir API anahtarı girin.' });
     // Reserve setup before yielding to prevent concurrent submissions.
     if (installing || configured) return json(response, 409, { error: 'Setup is already running or complete.' });
     installing = true;
     lastSetupAttempt = Date.now();
     lastError = '';
     try {
-      const check = await fetch('https://api.openai.com/v1/models', {
-        headers: { Authorization: `Bearer ${apiKey}` }, redirect: 'error', signal: AbortSignal.timeout(20000),
-      });
-      if (!check.ok) throw new Error(`OpenAI key verification failed (${check.status}). Check the key and its permissions.`);
-      await install(apiKey);
+      await testProvider(provider, apiKey, AbortSignal.timeout(20_000));
+      await providerSettings.save(provider, apiKey);
+      await providerSettings.setDefault(provider);
+      await install();
       json(response, 200, { configured: true });
     } catch (error) {
-      lastError = error instanceof Error ? error.message : 'Setup failed. Try again.';
+      lastError = providerFailure(error instanceof ProviderError ? error.status : 502);
       json(response, 502, { error: lastError });
     } finally { installing = false; }
   } catch { json(response, 400, { error: 'Invalid setup request.' }); }

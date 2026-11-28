@@ -1,3 +1,4 @@
+import { isProvider } from "./provider-catalog.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -28,7 +29,7 @@ function store(path: string) {
 
 // Only the evaluation fields used by the UI may reach disk.
 const fields = new Set([
-  "id", "datasetId", "rootDatasetId", "requestKey", "question", "model", "updated", "plan", "followUpPrompt", "attachmentEvidence", "rootQuestion", "parentRunId", "createdAt", "answers", "result", "documentUrl",
+  "id", "provider", "fallbackLanguage", "localAnswer", "datasetId", "rootDatasetId", "requestKey", "question", "model", "updated", "plan", "followUpPrompt", "attachmentEvidence", "rootQuestion", "parentRunId", "createdAt", "answers", "result", "documentUrl",
   "openaiModel", "questionType", "complexity", "agentCount", "agents", "agentId", "role", "task",
   "status", "answer", "diagramNotes", "wordCount", "error", "summaryPoints", "detailedAnswer", "finalAnswer",
   "displayAnswer", "showDiagram", "diagramIssue", "diagram", "nodes", "edges", "title", "detail", "kind", "from", "to", "label",
@@ -96,11 +97,14 @@ export function historyAction(path: string, body: Record<string, unknown>) {
       if (typeof body.requestKey !== "string" || !keyPattern.test(body.requestKey)) {
         throw new RequestError("Geçersiz kayıt anahtarı.", 400);
       }
+      const id = body.id;
+      if (id !== undefined && (typeof id !== "string" || !idPattern.test(id))) throw new RequestError("Geçersiz kayıt.", 400);
       const row = db.prepare(`
         SELECT data FROM runs WHERE json_extract(data, '$.requestKey') = ?
+          AND (? IS NULL OR id = ?)
           AND (? = 0 OR json_type(data, '$.result') = 'object')
         ORDER BY updated DESC, rowid DESC LIMIT 1
-      `).get(body.requestKey, body.completed ? 1 : 0);
+      `).get(body.requestKey, id ?? null, id ?? null, body.completed ? 1 : 0);
       return Response.json({ run: row ? JSON.parse(String(row.data)) : null },
         { headers: { "Cache-Control": "no-store" } });
     }
@@ -109,7 +113,8 @@ export function historyAction(path: string, body: Record<string, unknown>) {
       const run = body.run as Record<string, unknown> | undefined;
       if (!run || typeof run.id !== "string" || !idPattern.test(run.id) ||
         typeof run.requestKey !== "string" || !keyPattern.test(run.requestKey) ||
-        typeof run.question !== "string" || (run.rootQuestion !== undefined && typeof run.rootQuestion !== "string") || typeof run.model !== "string" || !Array.isArray(run.answers) ||
+        typeof run.question !== "string" || (run.rootQuestion !== undefined && typeof run.rootQuestion !== "string") ||
+        (run.model !== undefined && typeof run.model !== "string") || (run.provider !== undefined && !isProvider(run.provider)) || !Array.isArray(run.answers) ||
         (run.parentRunId !== undefined && (typeof run.parentRunId !== "string" || !idPattern.test(run.parentRunId))) ||
         (run.createdAt !== undefined && (typeof run.createdAt !== "number" || !Number.isSafeInteger(run.createdAt)))) {
         throw new RequestError("Geçersiz değerlendirme kaydı.", 400);

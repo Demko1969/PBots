@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { WORKFLOW_FILES, PUBLISHED_IDS, OPENAI_CREDENTIAL_ID, WEBHOOK_CREDENTIAL_ID, prepareWorkflow } from './workflows.mjs';
+import { WORKFLOW_FILES, PUBLISHED_IDS, OPENAI_CREDENTIAL_ID, PROVIDER_ENDPOINT, WEBHOOK_CREDENTIAL_ID, prepareWorkflow, restoreProviderRequests } from './workflows.mjs';
 
 test('prepares all eight workflows with connected subworkflows and local credentials', async () => {
   const source = await Promise.all(WORKFLOW_FILES.map(async file => JSON.parse(await readFile(new URL(`../workflows/${file}`, import.meta.url), 'utf8'))));
@@ -10,7 +10,7 @@ test('prepares all eight workflows with connected subworkflows and local credent
   const ids = new Set(prepared.map(workflow => workflow.id));
   assert.equal(ids.size, 8);
   for (const id of PUBLISHED_IDS) assert.ok(ids.has(id));
-  let openAiNodes = 0;
+  let providerNodes = 0;
   let webhookNodes = 0;
   for (const workflow of prepared) {
     assert.equal(workflow.active, false);
@@ -33,15 +33,20 @@ test('prepares all eight workflows with connected subworkflows and local credent
         assert.ok(ids.has(node.parameters.workflowId.value));
         assert.ok(PUBLISHED_IDS.includes(node.parameters.workflowId.value), 'sub-workflow dependencies must be published');
       }
-      if (node.parameters.url === 'https://api.openai.com/v1/responses') {
-        assert.equal(node.credentials.httpHeaderAuth.id, OPENAI_CREDENTIAL_ID);
-        openAiNodes++;
+      if (node.parameters.url === PROVIDER_ENDPOINT) {
+        assert.equal(node.credentials.httpHeaderAuth.id, WEBHOOK_CREDENTIAL_ID);
+        assert.equal(node.parameters.options.redirect.redirect.followRedirects, false);
+        providerNodes++;
       }
       assert.equal(node.credentials?.googleDriveOAuth2Api, undefined);
       assert.equal(node.credentials?.googleDocsOAuth2Api, undefined);
     }
   }
-  assert.equal(openAiNodes, 4);
+  assert.equal(providerNodes, 4);
   assert.equal(webhookNodes, 4);
+  for (const workflow of prepared) restoreProviderRequests(workflow);
+  const direct = prepared.flatMap(workflow => workflow.nodes).filter(node => node.parameters.url === 'https://api.openai.com/v1/responses');
+  assert.equal(direct.length, 4);
+  assert.ok(direct.every(node => node.credentials.httpHeaderAuth.id === OPENAI_CREDENTIAL_ID));
   assert.equal(JSON.stringify(source), sourceSnapshot, 'source exports remain intact');
 });

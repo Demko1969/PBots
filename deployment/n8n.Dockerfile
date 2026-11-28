@@ -10,5 +10,6 @@ RUN --mount=from=apk-tools,source=/sbin/apk.static,target=/sbin/apk,readonly \
 RUN mkdir -p /run/ortak-akil && chown node:node /run/ortak-akil
 USER node
 COPY --chown=node:node workflows /opt/ortak-akil/workflows
-COPY --chown=node:node deployment/setup-server.mjs deployment/workflows.mjs /opt/ortak-akil/deployment/
+COPY --chown=node:node deployment/setup-server.mjs deployment/workflows.mjs deployment/provider-adapters.mjs deployment/provider-settings.mjs /opt/ortak-akil/deployment/
+COPY --chown=node:node ui/lib/provider-catalog.mjs /opt/ortak-akil/ui/lib/
 ENTRYPOINT ["tini", "--", "node", "/opt/ortak-akil/deployment/setup-server.mjs"]

@@ -20,27 +20,30 @@ The chat workflow is distributed inactive and limited to the n8n editor.
 See the [installation and migration guide](deployment/README.md).
 
 In Docker, setup requires the n8n owner account before saving the first key.
-n8n encrypts provider credentials. Its database and encryption key live in
-the same private volume. Temporary credential import files use memory-backed
-storage. OpenAI HTTP nodes reject redirects and request `store: false`.
-Provider retention also depends on the account, provider policies and the
-applicable endpoint. Docker disables saved successful, failed and manual
+The setup service stores provider keys in an encrypted file in the private n8n
+volume, with key material derived from the token in a separate volume.
+The local adapter injects keys into outbound API requests. The UI receives
+provider status and model information. The n8n model nodes authenticate to
+the adapter over loopback using the internal token. The migration reads the
+previous OpenAI credential using a temporary file in memory-backed storage.
+Outbound API requests reject redirects, and OpenAI requests use `store: false`.
+Provider retention depends on the account, provider policies and endpoint. Docker disables saved successful, failed and manual
 execution data. Operational logs and backups still require private handling.
 Analysis API errors avoid returning upstream payloads.
 
 ## Data sent and retained
 
-- OpenAI receives questions, applicable follow-up context, independent
+- The selected provider receives questions, applicable follow-up context, independent
   responses, and the selected CSV columns, profiles, aggregate metrics and
   up to ten sample rows. CSV parsing and full-table calculations run locally.
-- JPG, PNG and PDF attachments are sent in full to OpenAI for analysis.
+- JPG, PNG and PDF attachments are sent in full to the selected provider for analysis.
   Attachment evidence and small image previews can appear in local history.
 - Optional Google Docs export sends a question and short decision report to
   Google. The report itself can still contain details from the analysis.
   Check the destination folder's sharing permissions before exporting.
 - SQLite history contains questions, previews and results and persists across
   restarts. Browsers on the same installation share it. New saves redact
-  recognized OpenAI key and bearer-token formats from text and CSV previews.
+  recognized provider key and bearer-token formats from text and CSV previews.
   Images and arbitrary secrets need separate care. Records and backups
   created before the fix may contain unredacted values. Follow the [history
   and backup procedure](deployment/README.md#existing-history-and-backups)

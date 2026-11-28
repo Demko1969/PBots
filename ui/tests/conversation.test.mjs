@@ -60,3 +60,12 @@ test("uses a new CSV for a follow-up and retains it for the next turn", () => {
   assert.doesNotMatch(attachedTurn.followUpPrompt, /Original CSV/);
   assert.ok(conversationPrompt(second.question, [csvRoot, attachedTurn]).endsWith(second.question + attachment));
 });
+
+test("carries both CSV and image evidence into a follow-up after the image turn", () => {
+  const csvRoot = { ...root, attachmentEvidence: "\n\nCSV analysis context\nPrior rows" };
+  const image = "\n\nDosya eki kanıtı: Prior chart";
+  const imageTurn = { ...first, attachmentEvidence: image };
+  const prompt = conversationPrompt(second.question, [csvRoot, imageTurn]);
+  assert.match(prompt, /Prior rows/);
+  assert.match(prompt, /Prior chart/);
+});
