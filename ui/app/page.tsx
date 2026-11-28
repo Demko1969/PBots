@@ -87,29 +87,18 @@ const modelOptions = [
 ];
 
 async function postStage<T>(stage: string, payload: unknown, signal?: AbortSignal): Promise<T> {
-  const id = location.protocol === "ortak:" && signal ? crypto.randomUUID() : undefined;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (id) headers["X-Ortak-Request"] = id;
-  function cancel() {
-    void appRequest("/api/cancel", { method: "POST", headers, body: JSON.stringify({ id }) }).catch(() => {});
-  }
   signal?.throwIfAborted();
-  if (id) signal?.addEventListener("abort", cancel, { once: true });
-  try {
-    const response = await appRequest(`/api/n8n/${stage}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal,
-    });
-    const data = await response.json().catch(() => ({ error: "Geçersiz sunucu yanıtı" }));
-    if (!response.ok) {
-      throw new Error(data.error || data.message || `İstek başarısız (${response.status})`);
-    }
-    return data as T;
-  } finally {
-    if (id) signal?.removeEventListener("abort", cancel);
+  const response = await appRequest(`/api/n8n/${stage}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  const data = await response.json().catch(() => ({ error: "Geçersiz sunucu yanıtı" }));
+  if (!response.ok) {
+    throw new Error(data.error || data.message || `İstek başarısız (${response.status})`);
   }
+  return data as T;
 }
 
 function formatInline(value: string): ReactNode[] {
@@ -132,32 +121,7 @@ const exampleQuestions = [
   "ERP’de siparişten tahsilata kadar hangi kontrolleri otomatikleştirebiliriz?",
 ];
 
-const demoSendBlades = {
-  top: "M16 73 54 9C62-1 80 1 86 17L43 72Q29 71 16 73Z",
-  right: "M91 27 124 83C134 99 122 113 107 113H100Q103 102 94 86L75 49Z",
-  bottom: "M19 81C35 81 64 90 81 91Q90 98 89 108Q88 114 83 114H19C-3 114-3 81 19 81Z",
-};
-
-function SendSymbol({ demo }: { demo: boolean }) {
-  if (demo) return (
-    <span className="send-symbol demo-send-symbol" aria-hidden="true">
-      <svg viewBox="0 0 131 117" strokeWidth="5.6" strokeLinejoin="round">
-        <g className="demo-send-rotor">
-          {Object.entries(demoSendBlades).map(([blade, path]) => (
-            <g key={blade} className={`demo-send-blade send-symbol-blade-${blade}`}>
-              <path className="demo-send-fill" d={path} />
-              <path className="demo-send-outline" d={path} />
-            </g>
-          ))}
-        </g>
-        <g className="demo-send-center">
-          <circle className="demo-send-fill" cx="65.5" cy="70.2" r="10" />
-          <circle className="demo-send-outline" cx="65.5" cy="70.2" r="10" />
-        </g>
-      </svg>
-    </span>
-  );
-
+function SendSymbol() {
   return (
     <span className="send-symbol" aria-hidden="true">
       <span className="send-symbol-blade send-symbol-blade-top" />
@@ -270,11 +234,14 @@ function ExportIcon({ kind }: { kind: "docs" | "diagram" }) {
   </svg>;
 }
 
-function AnimatedAnswer({ view, className = "", children }: { view: string | number; className?: string; children: ReactNode }) {
+function AnimatedAnswer({ view, className = "", children }: {
+  view: string | number; className?: string; children: ReactNode;
+}) {
   const frame = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const height = useRef<number | null>(null);
   const previousContent = useRef<HTMLDivElement | null>(null);
+  const previousView = useRef(view);
   const outgoing = useRef<HTMLDivElement>(null);
   const animation = useRef<Animation | null>(null);
 
@@ -291,6 +258,8 @@ function AnimatedAnswer({ view, className = "", children }: { view: string | num
     height.current = to;
     const previous = previousContent.current;
     previousContent.current = inner;
+    const fromProgress = previousView.current === "progress";
+    previousView.current = view;
     const overlay = outgoing.current;
     overlay?.replaceChildren();
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -330,7 +299,7 @@ function AnimatedAnswer({ view, className = "", children }: { view: string | num
       const fadeIn = inner.animate([
         { opacity: 0, transform: "translateY(5px)" },
         { opacity: 1, transform: "translateY(0)" },
-      ], { delay: 45, duration: 235, easing: "ease-out", fill: "backwards" });
+      ], { delay: fromProgress ? 160 : 45, duration: 235, easing: "ease-out", fill: "backwards" });
       if (!animation.current) fadeIn.onfinish = revealAnswerStart;
     } else if (previous && previous !== inner) {
       revealAnswerStart();
@@ -361,11 +330,10 @@ function savedTablePreview(run: SavedRun) {
   return tablePreviewFromContext(run.followUpPrompt ?? run.plan?.question ?? run.result?.question);
 }
 
-function ThreadQuestion({ question, thumbnail, table, imageUrl, tableLabel }: {
-  question: string; thumbnail?: string; table?: TablePreview; imageUrl?: string; tableLabel?: (value: string) => string;
+function ImagePreview({ imageUrl, className, label, alt = label, children }: {
+  imageUrl: string; className: string; label: string; alt?: string; children: ReactNode;
 }) {
-  const { language, t } = useMessages();
-  const number = new Intl.NumberFormat(language);
+  const { t } = useMessages();
   const dialog = useRef<HTMLDialogElement>(null);
 
   function dismissImage() {
@@ -375,29 +343,41 @@ function ThreadQuestion({ question, thumbnail, table, imageUrl, tableLabel }: {
     else preview.dataset.closing = "true";
   }
 
-  const imageSource = imageUrl ?? (isAttachmentThumbnail(thumbnail) ? thumbnail : undefined);
-  // eslint-disable-next-line @next/next/no-img-element
-  const image = imageSource && <img className="thread-question-image" src={imageSource} alt={t("Soruya eklenen görsel")} />;
   return <>
-    {image && imageUrl ? <>
-      <button className="demo-image-trigger" type="button" aria-label={t("Görseli büyüt")}
-        onClick={() => dialog.current?.showModal()}>{image}</button>
-      <dialog ref={dialog} className="diagram-dialog demo-image-dialog" aria-label={t("Finans talebinin ekran görüntüsü")}
-        onCancel={event => { event.preventDefault(); dismissImage(); }}
-        onClick={event => {
-          if (event.target !== event.currentTarget) return;
-          const { left, right, top, bottom } = event.currentTarget.getBoundingClientRect();
-          if (event.clientX < left || event.clientX > right || event.clientY < top || event.clientY > bottom) dismissImage();
-        }}
-        onAnimationEnd={event => {
-          if (event.animationName === "demo-image-dismiss") event.currentTarget.close();
-        }}
-        onClose={event => { delete event.currentTarget.dataset.closing; }}>
-        <button className="diagram-action diagram-close demo-image-close" type="button"
-          aria-label={t("Kapat")} title={t("Kapat")} onClick={dismissImage}>×</button>
-        <Image src={imageUrl} alt={t("T-ERP-024 Finans destek talebinin tamamı")} width={670} height={405} unoptimized />
-      </dialog>
-    </> : image}
+    <button className={className} type="button" aria-label={t("Görseli büyüt")}
+      aria-haspopup="dialog" onClick={() => dialog.current?.showModal()}>{children}</button>
+    <dialog ref={dialog} className="diagram-dialog image-preview-dialog" aria-label={label}
+      onCancel={event => { event.preventDefault(); dismissImage(); }}
+      onClick={event => {
+        if (event.target !== event.currentTarget) return;
+        const { left, right, top, bottom } = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < left || event.clientX > right || event.clientY < top || event.clientY > bottom) dismissImage();
+      }}
+      onAnimationEnd={event => {
+        if (event.animationName === "image-preview-dismiss") event.currentTarget.close();
+      }}
+      onClose={event => { delete event.currentTarget.dataset.closing; }}>
+      <button className="diagram-action diagram-close image-preview-close" type="button"
+        aria-label={t("Kapat")} title={t("Kapat")} onClick={dismissImage}>×</button>
+      {/* eslint-disable-next-line @next/next/no-img-element -- Attachments keep their original dimensions. */}
+      <img src={imageUrl} alt={alt} />
+    </dialog>
+  </>;
+}
+
+function ThreadQuestion({ question, thumbnail, table, imageUrl, demoImageUrl, tableLabel }: {
+  question: string; thumbnail?: string; table?: TablePreview; imageUrl?: string; demoImageUrl?: string; tableLabel?: (value: string) => string;
+}) {
+  const { language, t } = useMessages();
+  const number = new Intl.NumberFormat(language);
+  const imageSource = demoImageUrl ?? (isAttachmentThumbnail(thumbnail) ? thumbnail : imageUrl);
+  const imageLabel = t(demoImageUrl ? "Finans talebinin ekran görüntüsü" : "Soruya eklenen görsel");
+  return <>
+    {imageSource && <ImagePreview className="thread-image-trigger" imageUrl={demoImageUrl ?? imageUrl ?? imageSource}
+      label={imageLabel} alt={demoImageUrl ? t("T-ERP-024 Finans destek talebinin tamamı") : imageLabel}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- The source is an attachment preview. */}
+      <img className="thread-question-image" src={imageSource} alt={t("Soruya eklenen görsel")} />
+    </ImagePreview>}
     {table && (
       <div className="thread-table-preview" role="region" aria-label={t("Soruya eklenen tablo")} tabIndex={0}>
         <table>
@@ -414,8 +394,8 @@ function ThreadQuestion({ question, thumbnail, table, imageUrl, tableLabel }: {
   </>;
 }
 
-function ThreadTurn({ run, result, exports, imageUrl, tableLabel }: {
-  run: SavedRun; result: JudgeResult; exports: ReactNode; imageUrl?: string; tableLabel?: (value: string) => string;
+function ThreadTurn({ run, result, exports, imageUrl, demoImageUrl, tableLabel }: {
+  run: SavedRun; result: JudgeResult; exports: ReactNode; imageUrl?: string; demoImageUrl?: string; tableLabel?: (value: string) => string;
 }) {
   const { t } = useMessages();
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -425,7 +405,7 @@ function ThreadTurn({ run, result, exports, imageUrl, tableLabel }: {
   return (
     <article className="thread-entry">
       <div className="thread-turn-header">
-        <ThreadQuestion question={run.question} thumbnail={run.imageThumbnail} table={savedTablePreview(run)} imageUrl={imageUrl} tableLabel={tableLabel} />
+        <ThreadQuestion question={run.question} thumbnail={run.imageThumbnail} table={savedTablePreview(run)} imageUrl={imageUrl} demoImageUrl={demoImageUrl} tableLabel={tableLabel} />
         <div className="result-toolbar">
           {experts.length > 0 && <div className="result-experts" role="group" aria-label={t("Bu sorunun uzman görüşleri")}>
             <FinalResultButton selected={selectedId === null} onClick={() => setSelectedId(null)} />
@@ -551,7 +531,7 @@ function RichText({ text, hideDecisionHeading = false }: { text: string; hideDec
   );
 }
 
-function JudgingThoughts({ children }: { children: ReactNode }) {
+function JudgingThoughts({ children, visible = true }: { children: ReactNode; visible?: boolean }) {
   const scene = useRef<HTMLDivElement>(null);
   const bubble = useRef<HTMLDivElement>(null);
   const [paths, setPaths] = useState<string[]>([]);
@@ -581,7 +561,7 @@ function JudgingThoughts({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div className="judging-thoughts" ref={scene}>
+    <div className="judging-thoughts" data-thoughts-visible={visible} ref={scene}>
       <svg aria-hidden="true" className="thought-streams">
         {paths.map((path, index) => {
           const begin = `${(index % 5) * 0.14}s`;
@@ -607,21 +587,9 @@ function StatusMark({ status }: { status: AgentStatus }) {
   return <span className={`status-mark status-${status}`} aria-label={{ waiting: t("Bekliyor"), working: t("Çalışıyor"), done: t("Tamamlandı"), error: t("Hata") }[status]} role="img" />;
 }
 
-type DatasetSummary = { id: string; name: string };
-type Dataset = DatasetSummary & { text: string };
-
-async function datasetRequest<T>(body: Record<string, unknown>): Promise<T> {
-  const response = await appRequest("/api/datasets", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Veri kümelerine erişilemedi.");
-  return data as T;
-}
-
-function useAttachment(desktop: boolean, sample?: DemoScenario["csv"]) {
+function useAttachment(sample?: DemoScenario["csv"]) {
   const [media, setMedia] = useState<{ file: File; mime: string; digest: string; preview?: string; thumbnail?: string } | null>(null);
-  const [csvSource, setCsvSource] = useState<{ id?: string; name: string; text: string } | null>(sample ?? null);
+  const [csvSource, setCsvSource] = useState<DemoScenario["csv"] | null>(sample ?? null);
   const [readingCsv, setReadingCsv] = useState(false);
   const [csvError, setCsvError] = useState("");
   const csv = useMemo(() => {
@@ -653,11 +621,7 @@ function useAttachment(desktop: boolean, sample?: DemoScenario["csv"]) {
     try {
       if (isCsv) {
         const text = await file.text();
-        if (version !== loadVersion.current) return;
-        const imported = desktop ? (await datasetRequest<{ dataset: Dataset }>({
-          action: "import", name: file.name, text,
-        })).dataset : { name: file.name, text };
-        if (version === loadVersion.current) setCsvSource(imported);
+        if (version === loadVersion.current) setCsvSource({ name: file.name, text });
       } else {
         const bytes = await file.arrayBuffer();
         if (!matchesAttachmentSignature(new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 8)), mime)) {
@@ -675,27 +639,11 @@ function useAttachment(desktop: boolean, sample?: DemoScenario["csv"]) {
         }
       }
     }
-    catch (error) { if (version === loadVersion.current) setCsvError(error instanceof Error && desktop ? error.message : "Dosya okunamadı."); }
+    catch { if (version === loadVersion.current) setCsvError("Dosya okunamadı."); }
     finally { if (version === loadVersion.current) setReadingCsv(false); }
   }
 
-  async function openDataset(id: string) {
-    const version = ++loadVersion.current;
-    setCsvError("");
-    setReadingCsv(true);
-    try {
-      const { dataset } = await datasetRequest<{ dataset: Dataset }>({ action: "open", id });
-      if (version !== loadVersion.current) return;
-      setMedia(null);
-      setCsvSource(dataset);
-    } catch (error) {
-      if (version === loadVersion.current) setCsvError((error as Error).message);
-    } finally {
-      if (version === loadVersion.current) setReadingCsv(false);
-    }
-  }
-
-  return { csvSource, csv, openDataset,
+  return { csvSource, csv,
     readingCsv, csvError, tableProfile, loadAttachment, media, setCsvError };
 }
 
@@ -742,11 +690,11 @@ export default function Home() {
   return <Workspace />;
 }
 
-export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?: DemoScenario }) {
-  return <WorkspaceLanguage desktop={desktop}><WorkspaceContent desktop={desktop} demo={demo} /></WorkspaceLanguage>;
+export function Workspace({ demo }: { demo?: DemoScenario }) {
+  return <WorkspaceLanguage><WorkspaceContent demo={demo} /></WorkspaceLanguage>;
 }
 
-function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScenario }) {
+function WorkspaceContent({ demo }: { demo?: DemoScenario }) {
   const { language, t } = useMessages();
   const presentation = useMemo(() => demo?.presentation(language), [demo, language]);
   const showQuestionText = (text: string) => presentation?.question(text) ?? text;
@@ -754,8 +702,8 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
   const pageTitle = t(demo ? "Ortak Akıl | Tarayıcı demosu" : "Ortak Akıl — Çoklu Uzman Karar Alanı");
   useEffect(() => {
     document.documentElement.lang = language;
-    if (!desktop) document.title = pageTitle;
-  }, [desktop, language, pageTitle]);
+    document.title = pageTitle;
+  }, [language, pageTitle]);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const setupBlocked = !!setup?.enabled && (!setup.configured || !setup.connected || !!setup.installing);
   const [question, setQuestion] = useState(demo?.question ?? "");
@@ -763,11 +711,11 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
   const [followUpQuestion, setFollowUpQuestion] = useState("");
   const questionField = useRef<HTMLTextAreaElement>(null);
   const [showWorkspace, setShowWorkspace] = useState(false);
-  const questionAttachment = useAttachment(desktop, demo?.csv);
-  const followUpAttachment = useAttachment(desktop);
+  const questionAttachment = useAttachment(demo?.csv);
+  const followUpAttachment = useAttachment();
   const demoAttempt = useRef<string | undefined>(undefined);
   const { csvSource, csv,
-    readingCsv, csvError, tableProfile, loadAttachment, openDataset, media, setCsvError } = showWorkspace ? followUpAttachment : questionAttachment;
+    readingCsv, csvError, tableProfile, loadAttachment, media, setCsvError } = showWorkspace ? followUpAttachment : questionAttachment;
   const [draggingAttachment, setDraggingAttachment] = useState(false);
   const dragDepth = useRef(0);
   const hasAttachment = !!(media || csvSource);
@@ -797,26 +745,6 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
   const modelTrigger = useRef<HTMLButtonElement>(null);
   const modelChoices = useRef<HTMLDivElement>(null);
   const [csvOpen, setCsvOpen] = useState(false);
-  const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
-  const [datasetError, setDatasetError] = useState("");
-  const offeredSetup = useRef(false);
-  const updateSetup = useCallback((status: SetupStatus) => {
-    setSetup(status);
-    if (desktop && !status.configured && !offeredSetup.current) {
-      offeredSetup.current = true;
-      setSettingsOpen(true);
-    }
-  }, [desktop]);
-
-  useEffect(() => {
-    if (!desktop || !csvOpen) return;
-    let active = true;
-    void datasetRequest<{ datasets: DatasetSummary[] }>({ action: "list" }).then(
-      ({ datasets }) => { if (active) { setDatasets(datasets); setDatasetError(""); } },
-      error => { if (active) setDatasetError((error as Error).message); },
-    );
-    return () => { active = false; };
-  }, [desktop, csvOpen, csvSource?.id]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const historySearchField = useRef<HTMLInputElement>(null);
@@ -827,6 +755,16 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
   const evaluation = useRef<AbortController | null>(null);
   const [displayQuestion, setDisplayQuestion] = useState("");
   const [displayThumbnail, setDisplayThumbnail] = useState<string>();
+  const [displayImageUrl, setDisplayImageUrl] = useState<string>();
+  const sessionImages = useRef(new Map<string, string>());
+  const [sentImages, setSentImages] = useState<ReadonlyMap<string, string>>(() => new Map());
+  useEffect(() => {
+    const images = sessionImages.current;
+    return () => {
+      images.forEach(url => URL.revokeObjectURL(url));
+      images.clear();
+    };
+  }, []);
   const [displayTable, setDisplayTable] = useState<TablePreview>();
   const [activeRecord, setActiveRecord] = useState<SavedRun | null>(null);
   const [previousTurns, setPreviousTurns] = useState<SavedRun[]>([]);
@@ -1039,7 +977,15 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
     try {
       const { deletedIds } = await historyRequest<{ deletedIds: string[] }>(target);
       const deleted = new Set(deletedIds);
-      if (deleted.size) await collapseDeletedRecord(row);
+      for (const id of deleted) {
+        const url = sessionImages.current.get(id);
+        if (url) URL.revokeObjectURL(url);
+        sessionImages.current.delete(id);
+      }
+      if (deleted.size) {
+        setSentImages(new Map(sessionImages.current));
+        await collapseDeletedRecord(row);
+      }
       setManagementRuns(current => Object.fromEntries(
         Object.entries(current).map(([key, runs]) => [key, runs.filter(run => !deleted.has(run.id))])
       ));
@@ -1081,6 +1027,7 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
     setActiveRecord(run);
     setDisplayQuestion(run.question);
     setDisplayThumbnail(run.imageThumbnail);
+    setDisplayImageUrl(sessionImages.current.get(run.id));
     setDisplayTable(savedTablePreview(run));
     setPreviousTurns(earlierTurns(run, entries));
     setResult(directAnswer ? {
@@ -1127,11 +1074,14 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
     const controller = new AbortController();
     evaluation.current = controller;
     const { signal } = controller;
+    const imageFile = !demo && media?.mime.startsWith("image/") ? media.file : undefined;
+    let imageUrl: string | undefined;
     try {
+      if (imageFile) imageUrl = URL.createObjectURL(imageFile);
       const { kind, run } = await runEvaluation({
         question: cleanQuestion, model, followUp, previousTurns, csvSource, table: csv.table,
         media, requestScope: demo && isNewQuestion ? demoAttempt.current : undefined,
-        fallbackLanguage: demo || desktop ? undefined : language, setupBlocked, signal,
+        fallbackLanguage: demo ? undefined : language, setupBlocked, signal,
       }, {
         postStage,
         historyRequest,
@@ -1143,6 +1093,7 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
             case "planning":
               setDisplayQuestion(cleanQuestion);
               setDisplayThumbnail(progress.run.imageThumbnail);
+              setDisplayImageUrl(imageUrl);
               setDisplayTable(savedTablePreview(progress.run));
               setPreviousTurns(prior);
               setActiveRecord(null);
@@ -1170,10 +1121,15 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
         },
       });
       signal.throwIfAborted();
+      if (imageUrl && !sessionImages.current.has(run.id)) {
+        sessionImages.current.set(run.id, imageUrl);
+        setSentImages(new Map(sessionImages.current));
+        imageUrl = undefined;
+      }
       openSaved(run, prior, kind === "evaluated" ? "preserve" : "bottom");
       if (isNewQuestion) {
         setQuestion(demo?.question ?? "");
-        if (kind !== "direct" && !questionAttachment.csvSource?.id) {
+        if (kind !== "direct") {
           void questionAttachment.loadAttachment(undefined);
         }
       }
@@ -1196,6 +1152,7 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
       setQuestionError(message);
       showQuestion();
     } finally {
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
       evaluation.current = null;
       submitting.current = false;
       void refreshHistory();
@@ -1224,7 +1181,7 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
   function showDocsSetup() {
     setSettingsOpen(true);
     setCsvOpen(false);
-    if (!desktop) showQuestion(false);
+    showQuestion(false);
     requestAnimationFrame(() => document.getElementById("google-docs-setup")?.scrollIntoView({ block: "nearest" }));
   }
 
@@ -1247,17 +1204,17 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
         {discussionExperts.map((agent, index) => (
           <span key={agent.agentId} className="robot-progress" style={{ animationDelay: `${index}s` }}>
             <button type="button" className={`robot-head robot-${agent.status} progress-expert`}
-              aria-label={expertRole(agent.role)} onClick={() => setSelected(agent.agentId)}>
+              aria-label={expertRole(agent.role)} aria-pressed={selected === agent.agentId} onClick={() => setSelected(agent.agentId)}>
               <AgentIcon agentId={agent.agentId} /><ExpertRoleTooltip role={agent.role} />
             </button>
           </span>
         ))}
       </div>
     );
-    return stage === "judging" ? <JudgingThoughts>{robots}</JudgingThoughts> : robots;
+    return stage === "judging" ? <JudgingThoughts visible={selected === "final"}>{robots}</JudgingThoughts> : robots;
   }
 
-  const expertNavigation = ((result && discussionExperts.length > 0) || (isBusy && selectedAgent)) && <div className={isBusy ? "result-experts experts-running" : "result-experts"} role="group" aria-label={t("Uzman görüşleri")}>
+  const expertNavigation = result && discussionExperts.length > 0 && <div className="result-experts" role="group" aria-label={t("Uzman görüşleri")}>
               <FinalResultButton selected={selected === "final"} onClick={() => setSelected("final")} />
               {discussionExperts.map(agent => (
                 <button key={agent.agentId} type="button" className={`robot-head robot-${agent.status}`}
@@ -1316,19 +1273,27 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
   }
 
   const demoImage = demo && media && presentation?.imageUrl(followUpQuestion);
+  const attachmentImageUrl = demoImage || (media?.mime.startsWith("image/") ? media.preview : undefined);
+  const attachmentImageLabel = demoImage ? t("Finans talebinin ekran görüntüsü") : media?.file.name ?? t("Soruya eklenen görsel");
   const displayAttachmentName = demoImage ? t("Örnek Finans talebi.png") : attachmentName;
-  const attachmentCard = !isBusy && (attachmentName || readingCsv || csvError || csv.error) && (
-    <div className="attachment-preview">
-      {media?.mime.startsWith("image/") && media.preview && (
-        <Image src={demoImage || media.preview} alt={demo ? t("Örnek Finans talebi ekran görüntüsü") : ""} width={48} height={48} unoptimized />
+  const attachmentDetails = <>
+      {attachmentImageUrl && (
+        <Image src={attachmentImageUrl} alt={demo ? t("Örnek Finans talebi ekran görüntüsü") : ""} width={48} height={48} unoptimized />
       )}
-      <div className="attachment-description">
+      <span className="attachment-description">
         {displayAttachmentName && <strong title={displayAttachmentName}>{displayAttachmentName}</strong>}
         {media && <small>{media.mime === "application/pdf" ? "PDF" : media.mime === "image/png" ? "PNG" : "JPG"} · {Math.ceil(media.file.size / 1024)} KB</small>}
         {media?.mime === "application/pdf" && <a href={media.preview} target="_blank" rel="noreferrer">{t("PDF’yi önizle")}</a>}
         {readingCsv && <span role="status">{t("Dosya okunuyor…")}</span>}
         {(csvError || csv.error) && <span role="alert">{t(csvError || csv.error)}</span>}
-      </div>
+      </span>
+  </>;
+  const attachmentCard = !isBusy && (attachmentName || readingCsv || csvError || csv.error) && (
+    <div className="attachment-preview">
+      {attachmentImageUrl
+        ? <ImagePreview className="attachment-image-trigger" imageUrl={attachmentImageUrl} label={attachmentImageLabel}
+          alt={demoImage ? t("T-ERP-024 Finans destek talebinin tamamı") : attachmentImageLabel}>{attachmentDetails}</ImagePreview>
+        : attachmentDetails}
       {!readingCsv && <button type="button" className="text-button attachment-remove" aria-label={t("Eki kaldır")} disabled={!!demo}
         onClick={() => { void loadAttachment(undefined); setCsvOpen(false); }}>×</button>}
     </div>
@@ -1356,10 +1321,10 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
     <>
     <div id="csv-panel" className="composer-panel csv-input" data-table={!!panelTable}
       data-open={csvOpen} inert={!csvOpen} role="group" aria-label={t("Dosya ekle")}>
-      {demoImage ? (
-        <Image className="demo-ticket-preview" src={demoImage} alt={t("Örnek Finans talebi ekran görüntüsü")}
+      {demo ? demoImage ? (
+        <Image className="attachment-panel-image" src={demoImage} alt={t("Örnek Finans talebi ekran görüntüsü")}
           width={670} height={405} unoptimized />
-      ) : demo ? (
+      ) : (
         <div className="demo-csv-header">
           {tableSummary}
           <a className="text-button attachment-choose demo-csv-download" href={demo.download} download={demo.csv.name}
@@ -1372,18 +1337,10 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
           onClick={event => event.currentTarget.parentElement?.querySelector<HTMLInputElement>("#csv-file")?.click()}>
           {t("Dosya seç")}
         </button>
-      </>}
-      {desktop && <>
-        <label className="desktop-dataset-picker">
-          {t("Kayıtlı veri kümeleri")}
-          <select aria-label={t("Kayıtlı veri kümeleri")} value={csvSource?.id ?? ""} disabled={!canAttach || readingCsv}
-            onChange={event => { if (event.target.value) void openDataset(event.target.value); }}>
-            <option value="" disabled>{t("Veri kümesi seçin")}</option>
-            {datasets.map(dataset => <option key={dataset.id} value={dataset.id}>{dataset.name} · {dataset.id.slice(0, 6)}</option>)}
-          </select>
-        </label>
-        {datasetError && <p role="alert">{t(datasetError)}</p>}
-        <p>İçe aktarılan CSV bu Mac’te saklanır. Değerlendirme sırasında soru, dosya adı, sütun özeti ve ilk 10 satır OpenAI’ye gönderilir. JPG, PNG ve PDF eklerinin tamamı OpenAI’ye gönderilir.</p>
+        {attachmentImageUrl && <ImagePreview className="attachment-panel-image-trigger" imageUrl={attachmentImageUrl} label={attachmentImageLabel}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- The source is a local attachment. */}
+          <img className="attachment-panel-image" src={attachmentImageUrl} alt={attachmentImageLabel} />
+        </ImagePreview>}
       </>}
       {panelTable && <>
         {!demo && tableSummary}
@@ -1444,7 +1401,7 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
         </>
       )}
     </div>
-    {!demo && <Setup onStatus={updateSetup} desktop={desktop} />}
+    {!demo && <Setup onStatus={setSetup} />}
     {historyGroups.length > 0 && <HistoryDisclosure className="history-management" summary={<h2>{t("Değerlendirme kayıtları")}</h2>}>
       {historyError && <p className="history-error" role="status">{t(historyError)}</p>}
       {historyGroups.map(group => {
@@ -1477,6 +1434,12 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
 
   return (
     <main className="app-shell" data-demo={!!demo}
+      onKeyDown={event => {
+        if (event.key !== "Escape" || !historyOpen || !(event.target instanceof Element) ||
+            !event.target.closest(".run-history")) return;
+        setHistoryOpen(false);
+        document.getElementById("history-title")?.focus();
+      }}
       onDragEnter={event => {
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
@@ -1503,10 +1466,11 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
           <Image className="brand-logo" src={brandLogo} width={44} height={44} alt="" priority unoptimized />
           <span className="brand-name">Ortak Akıl</span>
         </div>
-        {!desktop && <LanguageSelect />}
+        <LanguageSelect />
       </header>
 
       <div className="evaluation-layout">
+        {historyOpen && <div className="history-scrim" aria-hidden="true" onClick={() => setHistoryOpen(false)} />}
         <aside className="run-history" aria-labelledby="history-title" data-open={historyOpen}>
           <button type="button" id="history-title" className="history-toggle text-button"
             aria-label={t("Değerlendirmeler")} title={t("Değerlendirmeler")} aria-expanded={historyOpen}
@@ -1515,7 +1479,7 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
           </button>
           <div id="history-panel" className="history-content" inert={!historyOpen}>
             <div className="history-heading-row">
-              <h2 className="history-heading">{t("Değerlendirmeler")}</h2>
+              <h2 className="history-heading" title={t("Değerlendirmeler")}>{t("Değerlendirmeler")}</h2>
               <button type="button" className="text-button sidebar-new-question" aria-label={t("Yeni soru")} title={t("Yeni soru")}
                 disabled={isBusy || savingDocs} onClick={() => {
                   historyOpenVersion.current++;
@@ -1564,7 +1528,7 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
           </div>
         </aside>
       <div className="evaluation-main" id="top">
-      {!showWorkspace && !demo && (
+      {!showWorkspace && stage === "idle" && (
         <div className="question-examples" aria-label={t("Örnek ERP sorusu")}>
           {exampleQuestions.map((example, index) =>
             <p key={example} style={{ animationDelay: `${index * 6}s` }}
@@ -1603,7 +1567,7 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
           <div className="composer-tools">
             {composerTools}
             <button className="primary-button symbol-send" type="submit" data-running={isBusy} aria-busy={isBusy} aria-label={t("Uzmanları çalıştır")} title={t("Uzmanları çalıştır")} disabled={(!question.trim() && !hasAttachment) || !openaiModel.trim() || isBusy || savingDocs || attachmentBlocked}>
-              <SendSymbol demo={!!demo} />
+              <SendSymbol />
             </button>
           </div>
           {questionError && <p className="question-error" role="alert">{t(questionError)}</p>}
@@ -1619,22 +1583,23 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
           <div className="thread-scroll" key={scrollRequest} role="region" aria-label={t("Sohbet mesajları")} tabIndex={0}>
           {previousTurns.map(run => run.result && <ThreadTurn key={`${scrollRequest}:${run.id}`}
             run={{ ...run, question: showQuestionText(run.question) }} result={presentation?.result(run.question, run.result) ?? run.result}
-            exports={resultExports(run)} imageUrl={presentation?.imageUrl(run.question)} tableLabel={presentation?.tableLabel} />)}
+            exports={resultExports(run)} imageUrl={sentImages.get(run.id)}
+            demoImageUrl={presentation?.imageUrl(run.question)} tableLabel={presentation?.tableLabel} />)}
           <article ref={currentTurn} className={isBusy ? "result-panel result-panel-running" : "result-panel"}>
             <div className="thread-turn-header">
               {displayQuestion && <ThreadQuestion question={showQuestionText(displayQuestion)} thumbnail={displayThumbnail}
-                table={displayTable} imageUrl={presentation?.imageUrl(displayQuestion)} tableLabel={presentation?.tableLabel} />}
+                table={displayTable} imageUrl={displayImageUrl} demoImageUrl={presentation?.imageUrl(displayQuestion)} tableLabel={presentation?.tableLabel} />}
             </div>
             <div className="result-toolbar">
-              {demo && isBusy ? (
-                <div className="demo-progress-row">
-                  {selectedAgent && <div className="demo-progress-return result-experts">
+              {isBusy ? (
+                <div className="turn-progress">
+                  {selectedAgent && <div className="progress-return result-experts">
                     <FinalResultButton selected={false} onClick={() => setSelected("final")} />
                   </div>}
                   <span className="sr-only" role="status">{stage === "planning" ? t("Değerlendirme başlatılıyor.")
                     : stage === "judging" ? t("Ortak karar hazırlanıyor.")
                     : t("{completed} / {total} uzman tamamlandı.", { completed: completedCount, total: agents.length })}</span>
-                  {stage === "planning" ? <PlanningCrew fixedCount={demo.expertCount(displayQuestion)} /> : renderProgressRobots()}
+                  {stage === "planning" ? <PlanningCrew fixedCount={demo?.expertCount(displayQuestion)} /> : renderProgressRobots()}
                 </div>
               ) : expertNavigation}
               {activeRecord && resultExports(activeRecord)}
@@ -1650,30 +1615,10 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
                 <>
                   {result ? (
                     <ResultText result={presentation?.result(displayQuestion, result) ?? result} />
-                  ) : demo && isBusy ? (
+                  ) : isBusy ? (
                     <div className="empty-result" aria-hidden="true" />
                   ) : (
-                    <div className="empty-result">
-                      {stage === "planning" || agents.length ? (
-                        <div className="progress-control">
-                          <div className="progress-robots">
-                            {stage === "planning" ? (
-                              <div className="planning-emblem">
-                                <span className="sr-only" role="status">{t("Değerlendirme başlatılıyor.")}</span>
-                                <PlanningCrew />
-                              </div>
-                            ) : (
-                              <div className="evaluation-progress" data-judging={stage === "judging"}>
-                                <span className="sr-only" role="status">{stage === "judging"
-                                  ? t("Ortak karar hazırlanıyor.")
-                                  : t("{completed} / {total} uzman tamamlandı.", { completed: completedCount, total: agents.length })}</span>
-                                {renderProgressRobots()}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ) : <StatusMark status={stage === "error" ? "error" : "waiting"} />}
-                    </div>
+                    <div className="empty-result"><StatusMark status={stage === "error" ? "error" : "waiting"} /></div>
                   )}
                 </>
               )}
@@ -1710,7 +1655,7 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
                   title={isBusy ? t("Durdur") : undefined}
                   onClick={isBusy ? () => evaluation.current?.abort() : undefined}
                   disabled={!isBusy && (!result || (!followUpQuestion.trim() && !hasAttachment) || !openaiModel.trim() || savingDocs || attachmentBlocked)}>
-                  <SendSymbol demo={!!demo} />
+                  <SendSymbol />
                 </button>
               </div>
             </form>

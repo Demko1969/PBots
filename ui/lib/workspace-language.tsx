@@ -26,10 +26,10 @@ function subscribeToLanguage(onChange: () => void) {
 
 function initialLanguage(): Language { return "en"; }
 
-export function WorkspaceLanguage({ desktop, children }: { desktop: boolean; children: ReactNode }) {
+export function WorkspaceLanguage({ children }: { children: ReactNode }) {
   const preferred = useSyncExternalStore(subscribeToLanguage, storedLanguage, initialLanguage);
   const [selection, setLanguage] = useState<Language>();
-  const language = desktop ? "tr" : selection ?? preferred;
+  const language = selection ?? preferred;
   return <LanguageContext.Provider value={language}>
     <ChangeLanguageContext.Provider value={language => {
       setLanguage(language);
@@ -54,13 +54,10 @@ export function useMessages() {
 export function LanguageSelect() {
   const { language, t } = useMessages();
   const changeLanguage = useContext(ChangeLanguageContext);
-  return <label className="language-picker">
-    <span>{t("Dil")}</span>
-    <select value={language} onChange={event => changeLanguage(event.target.value as Language)}>
-      {Object.entries(languageNames).map(([code, name]) =>
-        <option key={code} value={code} lang={code}>{name}</option>)}
-    </select>
-  </label>;
+  return <select className="language-picker" aria-label={t("Dil")} value={language} onChange={event => changeLanguage(event.target.value as Language)}>
+    {Object.entries(languageNames).map(([code, name]) =>
+      <option key={code} value={code} lang={code}>{name}</option>)}
+  </select>;
 }
 
 export function setupGuide(guide: "openai" | "google-docs", language: Language) {
