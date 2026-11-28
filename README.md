@@ -1,10 +1,16 @@
 # n8n + OpenAI Çoklu Uzman Sistemi
 
+**[Canlı demoyu aç · GitHub Pages](https://demko1969.github.io/ortak-akil/)**
+
+Örnek ERP sorusunu gönderin, uzman yanıtlarını ve çözüm akışını inceleyin, ardından hazır takip sorusunu deneyin. Kurulum ve OpenAI anahtarı gerekmez.
+
+Çevrimdışı kullanım için `Ortak-Akil-Demo.html` dosyasını yayımlandığında [GitHub Releases](https://github.com/Demko1969/ortak-akil/releases) sayfasından indirebilir ve tarayıcıda açabilirsiniz.
+
 Bu proje bir soruyu bağımsız uzman rollerine böler, uzman yanıtlarını paralel çalıştırır ve OpenAI Responses API ile tek bir nihai cevapta birleştirir. n8n workflow'ları kaynak gerçektir; Git deposundaki JSON dosyaları n8n'den dışa aktarılan sürümlerdir.
 
 ## İndirme ve yerel kurulum
 
-1. [GitHub deposunda](https://github.com/Demko1969/Ai_Project) **Code → Download ZIP** seçeneğini kullanın ve ZIP’i açın. Önce Git geçmişindeki eski özel raporlar için [güvenlik notlarını](SECURITY.md#repository-history) okuyun. Özel depoyu indirmek için GitHub hesabınıza giriş yapmanız ve depoya erişiminiz olması gerekir. Git kullanıyorsanız `git clone https://github.com/Demko1969/Ai_Project.git` komutunu çalıştırabilirsiniz.
+1. [GitHub deposunda](https://github.com/Demko1969/ortak-akil) **Code → Download ZIP** seçeneğini kullanın ve ZIP’i açın. Önce Git geçmişindeki eski özel raporlar için [güvenlik notlarını](SECURITY.md#repository-history) okuyun. Özel depoyu indirmek için GitHub hesabınıza giriş yapmanız ve depoya erişiminiz olması gerekir. Git kullanıyorsanız `git clone https://github.com/Demko1969/ortak-akil.git` komutunu çalıştırabilirsiniz.
 2. Docker Desktop’ı kurup başlatın. macOS ve Linux’ta terminali çıkardığınız proje klasöründe açıp aşağıdaki komutu çalıştırın. Windows’ta Docker Desktop’ı Linux container modunda başlatıp `scripts/start.cmd` dosyasını açın.
 
    ```sh
