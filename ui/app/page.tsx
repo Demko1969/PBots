@@ -1460,7 +1460,6 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
   );
 
   const panelTable = demo ? questionAttachment.csv.table : csv.table;
-  const panelProfile = demo ? questionAttachment.tableProfile : tableProfile;
   const composerPanels = (
     <>
     <div id="csv-panel" className="composer-panel csv-input" data-table={!!panelTable}
@@ -1482,15 +1481,16 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
           <thead><tr>{panelTable.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
           <tbody>{panelTable.rows.slice(0, 5).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} title={cell}>{cell}</td>)}</tr>)}</tbody>
         </table></div>
-        <div className="table-preview" tabIndex={0} role="region" aria-label="Sütun istatistikleri"><table>
-          <caption>Tüm dosya üzerinden hesaplanan özet</caption>
-          <thead><tr><th scope="col">Sütun</th><th scope="col">Tür</th><th scope="col">Eksik</th><th scope="col">Toplam</th><th scope="col">Ortalama</th><th scope="col">Min / Maks</th></tr></thead>
-          <tbody>{panelProfile.map(column => <tr key={column.name}>
-            <td>{column.name}</td><td>{column.type === "number" ? "Sayı" : "Metin"}</td><td>{column.missing}</td>
-            <td>{column.statistics ? previewNumber.format(column.statistics.sum) : "—"}</td><td>{column.statistics ? previewNumber.format(column.statistics.mean) : "—"}</td>
-            <td>{column.statistics ? `${previewNumber.format(column.statistics.min)} / ${previewNumber.format(column.statistics.max)}` : "—"}</td>
-          </tr>)}</tbody>
-        </table></div>
+        {!demo &&
+          <div className="table-preview" tabIndex={0} role="region" aria-label="Sütun istatistikleri"><table>
+            <caption>Tüm dosya üzerinden hesaplanan özet</caption>
+            <thead><tr><th scope="col">Sütun</th><th scope="col">Tür</th><th scope="col">Eksik</th><th scope="col">Toplam</th><th scope="col">Ortalama</th><th scope="col">Min / Maks</th></tr></thead>
+            <tbody>{tableProfile.map(column => <tr key={column.name}>
+              <td>{column.name}</td><td>{column.type === "number" ? "Sayı" : "Metin"}</td><td>{column.missing}</td>
+              <td>{column.statistics ? previewNumber.format(column.statistics.sum) : "—"}</td><td>{column.statistics ? previewNumber.format(column.statistics.mean) : "—"}</td>
+              <td>{column.statistics ? `${previewNumber.format(column.statistics.min)} / ${previewNumber.format(column.statistics.max)}` : "—"}</td>
+            </tr>)}</tbody>
+          </table></div>}
       </>}
     </div>
     <div id="evaluation-settings" className="composer-panel evaluation-options"
@@ -1528,12 +1528,6 @@ export function Workspace({ demo }: { demo?: DemoScenario }) {
       </>}
 
     </div>
-    {demo && <section className="setup-panel" aria-labelledby="demo-setup-title">
-      <h2 id="demo-setup-title">İlk kurulum</h2>
-      <label htmlFor="demo-setup-key">OpenAI API anahtarı</label>
-      <input id="demo-setup-key" type="password" placeholder="sk-…" disabled />
-      <button type="button" className="primary-button" disabled>Kurulumu tamamla</button>
-    </section>}
     {!demo && <Setup onStatus={setSetup} />}
     {historyGroups.length > 0 && <HistoryDisclosure className="history-management" summary={<h2>Değerlendirme kayıtları</h2>}>
       {historyError && <p className="history-error" role="status">{historyError}</p>}
