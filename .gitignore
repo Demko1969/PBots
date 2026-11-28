@@ -13,3 +13,8 @@ tmp/
 *.key
 /package-lock.json
 /design-previews/
+
+# Local agent instructions, setup notes, specs, and tickets
+/AGENTS.md
+/docs/agents/
+/.scratch/
