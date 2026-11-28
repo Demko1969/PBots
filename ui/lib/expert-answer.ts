@@ -1,4 +1,4 @@
-const diagramLabel = /(?:^|(?<=[.!?]\s))\s*(?:#{1,6}\s+|[-*]\s+)?(?:\*\*)?(?:(?:çözüm|süreç|karar)\s+akışı(?:\s+diyagramı)?|akış (?:diyagramı|şeması)|diyagram(?: yolu| taslağı| akışı)?|flowchart)(?:\s*\([^\n)]{1,40}\))?(?:\*\*)?\s*[:：]/iu;
+const diagramLabel = /(?:^|(?<=[.!?]\s))\s*(?:#{1,6}\s+|[-*]\s+)?(?:\*\*)?(?:(?:çözüm|süreç|karar)\s+akışı(?:\s+diyagramı)?|akış (?:diyagramı|şeması)|diyagram(?: yolu| taslağı| akışı)?|(?:solution |process )?diagram|diagramme(?: de (?:solution|processus))?|schéma de solution|flowchart)(?:\s*\([^\n)]{1,40}\))?(?:\*\*)?\s*[:：]/iu;
 const nextSection = /^(?:#{1,6}\s+)?(?:\*\*)?[\p{L}][\p{L}\s]{2,45}(?:\*\*)?\s*[:：]/u;
 const connectors = /→|-->|->|⇒|\b(?:flowchart|graph)\s+(?:TD|TB|LR|RL|BT)\b/iu;
 

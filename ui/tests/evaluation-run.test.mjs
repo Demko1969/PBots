@@ -322,3 +322,25 @@ test("waits for an in-flight lease renewal before unlocking on cancellation", { 
   assert.deepEqual(actions, ["lock", "lock", "unlock"]);
   assert.deepEqual(requests, []);
 });
+
+test("uses the current question for language selection and forwards the Planner's choice", async () => {
+  const { input, dependencies, requests } = evaluationFixture();
+  const postStage = dependencies.postStage;
+  dependencies.postStage = async (stage, payload) => {
+    const result = await postStage(stage, payload);
+    return stage === "plan" ? { ...result, replyLanguage: "tr" } : result;
+  };
+  const { run: first } = await runEvaluation({ ...input, fallbackLanguage: "fr" }, dependencies);
+  requests.length = 0;
+
+  const question = "Bir çözüm diyagramı da ekle.";
+  const { run } = await runEvaluation({
+    ...input, question, fallbackLanguage: "fr", followUp: first,
+  }, dependencies);
+
+  assert.equal(requests[0].payload.languageQuestion, question);
+  assert.equal(requests[0].payload.fallbackLanguage, "fr");
+  assert.ok(requests[0].payload.question.includes(first.question));
+  assert.ok(requests.slice(1).every(request => request.payload.replyLanguage === "tr"));
+  assert.equal(run.result.finalAnswer, "Stok hedefini talebe göre ayarlayın.");
+});

@@ -1131,7 +1131,7 @@ function WorkspaceContent({ desktop, demo }: { desktop: boolean; demo?: DemoScen
       const { kind, run } = await runEvaluation({
         question: cleanQuestion, model, followUp, previousTurns, csvSource, table: csv.table,
         media, requestScope: demo && isNewQuestion ? demoAttempt.current : undefined,
-        setupBlocked, signal,
+        fallbackLanguage: demo || desktop ? undefined : language, setupBlocked, signal,
       }, {
         postStage,
         historyRequest,
