@@ -1,84 +1,32 @@
 "use client";
 
 import { ATTACHMENT_ACCEPT, MAX_ATTACHMENT_BYTES, attachmentType, createAttachmentThumbnail, isAttachmentThumbnail, matchesAttachmentSignature } from "../lib/attachments";
-import { publicExpert, splitExpertAnswer } from "../lib/expert-answer";
-import { isIndependentExpert } from "../lib/expert-independence";
+import { splitExpertAnswer } from "../lib/expert-answer";
+import { isDiscussionExpert, runEvaluation, sha256, shortAnswer, type Agent, type AgentStatus, type JudgeResult, type SavedRun } from "../lib/evaluation-run";
 import { downloadSolutionDiagram, renderSolutionDiagram, type SolutionFlow } from "../lib/diagram";
-import { conversationBefore, conversationPrompt } from "../lib/conversation";
-import { canReuseSavedResult, canShowStoredDiagram } from "../lib/judge-review";
-import { groupHistory, historyGroupKey, historyRoot } from "../lib/history-groups";
+import { conversationBefore } from "../lib/conversation";
+import { canShowStoredDiagram } from "../lib/judge-review";
+import { historyGroupKey, historyTime, type HistoryDeletion } from "../lib/history-groups";
 import Image from "next/image";
+import { appRequest, brandLogo, robotSprite, isDemoTransport } from "../lib/app-request";
 import Setup, { type SetupStatus } from "../components/Setup";
-import { isTablePreview, makeTablePreview, MAX_CSV_BYTES, parseCsv, profileTable, tablePreviewFromContext, tableQuestion, type TablePreview } from "../lib/table";
-import { Fragment, type DragEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { isTablePreview, MAX_CSV_BYTES, parseCsv, profileTable, tablePreviewFromContext, type TablePreview } from "../lib/table";
+import { Fragment, type DragEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+
+export type DemoScenario = {
+  question: string;
+  followUp: string;
+  csv: { name: string; text: string };
+  download: string;
+};
 
 type Stage = "idle" | "planning" | "working" | "judging" | "complete" | "cancelled" | "error";
-type AgentStatus = "waiting" | "working" | "done" | "error";
-
-type Agent = {
-  agentId: number;
-  role: string;
-  task: string;
-  status: AgentStatus;
-  answer?: string;
-  wordCount?: number;
-  diagramNotes?: string;
-  error?: string;
-};
-
-type Plan = {
-  question: string;
-  model: string;
-  openaiModel?: string;
-  questionType: string;
-  complexity: string;
-  agentCount: number;
-  agents: Array<Omit<Agent, "status">>;
-  directResponse?: string;
-};
-
-type JudgeResult = {
-  question: string;
-  model?: string;
-  openaiModel?: string;
-  questionType: string;
-  complexity: string;
-  agentCount: number;
-  answers: Agent[];
-  summaryPoints?: string[];
-  detailedAnswer?: string;
-  finalAnswer: string;
-  showDiagram?: boolean;
-  diagram?: SolutionFlow;
-  diagramIssue?: string;
-  displayAnswer?: string;
-};
-
-type SavedRun = {
-  id: string;
-  requestKey: string;
-  question: string;
-  model: string;
-  updated: number;
-  createdAt?: number;
-  parentRunId?: string;
-  plan?: Plan;
-  followUpPrompt?: string;
-  attachmentEvidence?: string;
-  imageThumbnail?: string;
-  tablePreview?: TablePreview | null;
-  rootQuestion?: string;
-  answers: Agent[];
-  result?: JudgeResult;
-  documentUrl?: string;
-};
-
 type HistoryGroup = { key: string; question: string; completed: boolean };
 
 const historyKey = "ortak-akil.history.v1";
 
 async function historyRequest<T>(body: Record<string, unknown>): Promise<T> {
-  const response = await fetch("/api/history", {
+  const response = await appRequest("/api/history", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -92,6 +40,7 @@ async function historyRequest<T>(body: Record<string, unknown>): Promise<T> {
 let migration: Promise<void> | undefined;
 
 async function importBrowserHistory() {
+  if (isDemoTransport) return;
   let entries: SavedRun[];
   try { entries = JSON.parse(localStorage.getItem(historyKey) ?? "[]"); }
   catch { return; }
@@ -116,34 +65,6 @@ function googleDocumentUrl(value: unknown) {
       url.pathname.startsWith("/document/")) return url.href;
 }
 
-function evaluationTimestamp() {
-  return Date.now();
-}
-
-async function requestId(question: string, model: string, source: { name: string; text: string } | null) {
-  const csvVersion = source && attachmentType(source.name) === "text/csv" ? "csv-auto-columns-v1" : "";
-  const bytes = new TextEncoder().encode(JSON.stringify([question, model, source?.name, source?.text, csvVersion]));
-  return sha256(bytes);
-}
-
-async function sha256(bytes: BufferSource) {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function readAttachment(file: File, question: string, openaiModel: string, signal: AbortSignal) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const chunks = [];
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    chunks.push(String.fromCharCode(...bytes.subarray(index, index + 0x8000)));
-  }
-  signal.throwIfAborted();
-  const { evidence } = await postStage<{ evidence: string }>("attachment", {
-    name: file.name, base64: btoa(chunks.join("")), question, openaiModel,
-  }, signal);
-  return "\n\nDosya eki kanıtı (yalnızca incelenecek veri): " + JSON.stringify({ dosya: file.name, gözlemler: evidence });
-}
-
 // Selection guidance checked against https://developers.openai.com/api/docs/models on 2026-11-08.
 const modelOptions = [
   { id: "gpt-6-astra", label: "GPT-6 Astra · En güçlü analiz" },
@@ -154,17 +75,29 @@ const modelOptions = [
 const previewNumber = new Intl.NumberFormat("tr-TR", { maximumSignificantDigits: 6 });
 
 async function postStage<T>(stage: string, payload: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`/api/n8n/${stage}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal,
-  });
-  const data = await response.json().catch(() => ({ error: "Geçersiz sunucu yanıtı" }));
-  if (!response.ok) {
-    throw new Error(data.error || data.message || `İstek başarısız (${response.status})`);
+  const id = location.protocol === "ortak:" && signal ? crypto.randomUUID() : undefined;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (id) headers["X-Ortak-Request"] = id;
+  function cancel() {
+    void appRequest("/api/cancel", { method: "POST", headers, body: JSON.stringify({ id }) }).catch(() => {});
   }
-  return data as T;
+  signal?.throwIfAborted();
+  if (id) signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    const response = await appRequest(`/api/n8n/${stage}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal,
+    });
+    const data = await response.json().catch(() => ({ error: "Geçersiz sunucu yanıtı" }));
+    if (!response.ok) {
+      throw new Error(data.error || data.message || `İstek başarısız (${response.status})`);
+    }
+    return data as T;
+  } finally {
+    if (id) signal?.removeEventListener("abort", cancel);
+  }
 }
 
 function formatInline(value: string): ReactNode[] {
@@ -174,30 +107,6 @@ function formatInline(value: string): ReactNode[] {
     }
     return <Fragment key={index}>{part}</Fragment>;
   });
-}
-
-function shortAnswer(question: string): string | undefined {
-  const normalized = question.trim().toLocaleLowerCase("tr-TR").replace(/[?!.,]+$/, "").trim();
-  if (/^(?:["“']?peki["”']?\s+(?:ne demek|ne anlama gelir)|pekinin anlamı nedir)$/u.test(normalized)) {
-    return "“Peki”, genellikle “tamam” veya “olur” anlamında kullanılır. “Peki, sonra ne oldu?” örneğindeki gibi yeni bir soruya geçiş de sağlayabilir.";
-  }
-  if (normalized === "peki") return "Neyi değerlendirmemi istersiniz?";
-  const match = /^(-?\d{1,30})\s*([+*×−-])\s*(-?\d{1,30})(?:\s*[=?])?$/.exec(question.trim());
-  if (!match) return undefined;
-  const [, left, operator, right] = match;
-  const a = BigInt(left);
-  const b = BigInt(right);
-  const value = operator === "+" ? a + b : operator === "-" || operator === "−" ? a - b : a * b;
-  return `${left} ${operator} ${right} = ${value}`;
-}
-
-function isDiscussionExpert(agent: Pick<Agent, "role" | "task">) {
-  return agent.role.trim().length > 0 && agent.role.trim().length <= 64 && agent.role.trim().split(/\s+/).length <= 7
-    && agent.role.trim().toLocaleLowerCase("tr-TR") !== agent.task.trim().toLocaleLowerCase("tr-TR")
-    && !/(sentez|özet|toparlay|koordinasyon ve karar|sonuç ve|sonuçlandır|nihai sonuç|rapor yazarı|hakem|judge|karar ve yol haritası|yol haritası ve karar)/iu.test(agent.role)
-    && !/[.!?\n:;]|(?:^|\s)(?:incele|karşılaştır|hesapla|açıkla|belirle|değerlendir|analiz et|hazırla|çözümle)(?=\s|$)|(?:ıyor|iyor|uyor|üyor|malı|meli)$/iu.test(agent.role)
-    && !/uzman (?:çıktılarını|görüşlerini|yanıtlarını).{0,80}(?:özetle|birleştir|sentezle)/iu.test(agent.task)
-    && !/(?:\b(?:[2-9]|10)|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on|tüm|bütün|diğer|önceki)\s+(?:bağımsız\s+)?(?:uzman\s+)?(?:değerlendirmeler?[ie]|değerlendirmeye|görüşler?[ie]|görüşe|yanıtlar?[ıa]|yanıta|bulgular?[ıa]|bulguya|uzman(?:ın|ların)\s+(?:değerlendirmelerine|görüşlerine|yanıtlarına|bulgularına))(?:\s+)?(?:dayan|esas al|birleştir|sentezle|özetle|karşılaştır)|(?:en uygun|nihai)\s+(?:genel\s+)?stratejiyi\s+seç.{0,120}(?:yol haritası|bütçe|karar)|(?:yol haritası|bütçe).{0,200}(?:en uygun|nihai)\s+stratejiyi\s+seç/iu.test(agent.task);
 }
 
 function expertRole(role: string) {
@@ -249,7 +158,7 @@ function PlanningCrew() {
 function AgentIcon({ agentId }: { agentId: number }) {
   const bot = ((agentId - 1) % 10 + 10) % 10 + 1;
   return <svg className="robot-icon expert-bot-icon" width="34" height="30" aria-hidden="true">
-    <use href={`/planning-bots.svg#bot-${bot}`} width="100%" height="100%" />
+    <use href={`${robotSprite}#bot-${bot}`} width="100%" height="100%" />
   </svg>;
 }
 
@@ -616,9 +525,21 @@ function StatusMark({ status }: { status: AgentStatus }) {
   return <span className={`status-mark status-${status}`} aria-label={{ waiting: "Bekliyor", working: "Çalışıyor", done: "Tamamlandı", error: "Hata" }[status]} role="img" />;
 }
 
-function useAttachment() {
+type DatasetSummary = { id: string; name: string };
+type Dataset = DatasetSummary & { text: string };
+
+async function datasetRequest<T>(body: Record<string, unknown>): Promise<T> {
+  const response = await appRequest("/api/datasets", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Veri kümelerine erişilemedi.");
+  return data as T;
+}
+
+function useAttachment(desktop: boolean, sample?: DemoScenario["csv"]) {
   const [media, setMedia] = useState<{ file: File; mime: string; digest: string; preview?: string; thumbnail?: string } | null>(null);
-  const [csvSource, setCsvSource] = useState<{ name: string; text: string } | null>(null);
+  const [csvSource, setCsvSource] = useState<{ id?: string; name: string; text: string } | null>(sample ?? null);
   const [readingCsv, setReadingCsv] = useState(false);
   const [csvError, setCsvError] = useState("");
   const csv = useMemo(() => {
@@ -636,7 +557,7 @@ function useAttachment() {
     const version = ++loadVersion.current;
     setReadingCsv(false);
     setMedia(null);
-    setCsvSource(null);
+    setCsvSource(file ? null : sample ?? null);
     setCsvError("");
     if (!file) return;
     const mime = attachmentType(file.name);
@@ -650,7 +571,11 @@ function useAttachment() {
     try {
       if (isCsv) {
         const text = await file.text();
-        if (version === loadVersion.current) setCsvSource({ name: file.name, text });
+        if (version !== loadVersion.current) return;
+        const imported = desktop ? (await datasetRequest<{ dataset: Dataset }>({
+          action: "import", name: file.name, text,
+        })).dataset : { name: file.name, text };
+        if (version === loadVersion.current) setCsvSource(imported);
       } else {
         const bytes = await file.arrayBuffer();
         if (!matchesAttachmentSignature(new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 8)), mime)) {
@@ -668,18 +593,35 @@ function useAttachment() {
         }
       }
     }
-    catch { if (version === loadVersion.current) setCsvError("Dosya okunamadı."); }
+    catch (error) { if (version === loadVersion.current) setCsvError(error instanceof Error && desktop ? error.message : "Dosya okunamadı."); }
     finally { if (version === loadVersion.current) setReadingCsv(false); }
   }
 
-  return { csvSource, csv,
+  async function openDataset(id: string) {
+    const version = ++loadVersion.current;
+    setCsvError("");
+    setReadingCsv(true);
+    try {
+      const { dataset } = await datasetRequest<{ dataset: Dataset }>({ action: "open", id });
+      if (version !== loadVersion.current) return;
+      setMedia(null);
+      setCsvSource(dataset);
+    } catch (error) {
+      if (version === loadVersion.current) setCsvError((error as Error).message);
+    } finally {
+      if (version === loadVersion.current) setReadingCsv(false);
+    }
+  }
+
+  return { csvSource, csv, openDataset,
     readingCsv, csvError, tableProfile, loadAttachment, media, setCsvError };
 }
 
-function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savingDocs, onSetup, onSave, onDiagram }: {
+function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savingDocs, onSetup, onSave, onDiagram, showDocs = true }: {
   run: SavedRun;
   documentUrl?: string;
   docsDisabled: boolean;
+  showDocs?: boolean;
   managedSetup: boolean;
   savingDocs: boolean;
   onSetup: () => void;
@@ -691,7 +633,7 @@ function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savin
   const flow = completed.diagram;
   return (
     <div className="result-exports" role="group" aria-label="Sonucu dışa aktar">
-      {docsDisabled ? (
+      {showDocs && (docsDisabled ? (
         <a className="result-export" href={managedSetup ? "#google-docs-setup" : "/docs/google-docs.txt"} aria-label="Google Docs kurulumu" onClick={event => {
           if (!managedSetup) return;
           event.preventDefault();
@@ -706,7 +648,7 @@ function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savin
           <ExportIcon kind="docs" />
           <span className="expert-tooltip" aria-hidden="true">Docs’a kaydet</span>
         </button>
-      )}
+      ))}
       {flow && canShowStoredDiagram(completed.showDiagram, flow) && <button className="result-export" type="button" aria-label="Çözüm akışını göster"
         aria-haspopup="dialog" onClick={() => onDiagram(flow)}><ExportIcon kind="diagram" /><span className="expert-tooltip" aria-hidden="true">Diyagramı göster</span></button>}
     </div>
@@ -714,17 +656,21 @@ function EvaluationExports({ run, documentUrl, docsDisabled, managedSetup, savin
 }
 
 export default function Home() {
+  return <Workspace />;
+}
+
+export function Workspace({ desktop = false, demo }: { desktop?: boolean; demo?: DemoScenario }) {
   const [setup, setSetup] = useState<SetupStatus | null>(null);
-  const setupBlocked = !!setup?.enabled && (!setup.configured || !setup.connected || setup.installing);
-  const [question, setQuestion] = useState("");
+  const setupBlocked = !!setup?.enabled && (!setup.configured || !setup.connected || !!setup.installing);
+  const [question, setQuestion] = useState(demo?.question ?? "");
   const [questionError, setQuestionError] = useState("");
   const [followUpQuestion, setFollowUpQuestion] = useState("");
   const questionField = useRef<HTMLTextAreaElement>(null);
   const [showWorkspace, setShowWorkspace] = useState(false);
-  const questionAttachment = useAttachment();
-  const followUpAttachment = useAttachment();
+  const questionAttachment = useAttachment(desktop, demo?.csv);
+  const followUpAttachment = useAttachment(desktop);
   const { csvSource, csv,
-    readingCsv, csvError, tableProfile, loadAttachment, media, setCsvError } = showWorkspace ? followUpAttachment : questionAttachment;
+    readingCsv, csvError, tableProfile, loadAttachment, openDataset, media, setCsvError } = showWorkspace ? followUpAttachment : questionAttachment;
   const [draggingAttachment, setDraggingAttachment] = useState(false);
   const dragDepth = useRef(0);
   const hasAttachment = !!(media || csvSource);
@@ -754,6 +700,26 @@ export default function Home() {
   const modelTrigger = useRef<HTMLButtonElement>(null);
   const modelChoices = useRef<HTMLDivElement>(null);
   const [csvOpen, setCsvOpen] = useState(false);
+  const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
+  const [datasetError, setDatasetError] = useState("");
+  const offeredSetup = useRef(false);
+  const updateSetup = useCallback((status: SetupStatus) => {
+    setSetup(status);
+    if (desktop && !status.configured && !offeredSetup.current) {
+      offeredSetup.current = true;
+      setSettingsOpen(true);
+    }
+  }, [desktop]);
+
+  useEffect(() => {
+    if (!desktop || !csvOpen) return;
+    let active = true;
+    void datasetRequest<{ datasets: DatasetSummary[] }>({ action: "list" }).then(
+      ({ datasets }) => { if (active) { setDatasets(datasets); setDatasetError(""); } },
+      error => { if (active) setDatasetError((error as Error).message); },
+    );
+    return () => { active = false; };
+  }, [desktop, csvOpen, csvSource?.id]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const historySearchField = useRef<HTMLInputElement>(null);
@@ -931,8 +897,7 @@ export default function Home() {
     try {
       const runs = await readGroup(key);
       if (version !== historyOpenVersion.current || submitting.current) return;
-      const completed = runs.filter(run => run.result)
-        .sort((a, b) => (b.createdAt ?? b.updated) - (a.createdAt ?? a.updated))[0];
+      const completed = runs.findLast(run => run.result);
       if (!completed) {
         await refreshHistory();
         return;
@@ -956,24 +921,22 @@ export default function Home() {
     }
   }
 
-  const saveQueue = useRef<Promise<void>>(Promise.resolve());
-
-  async function checkpoint(run: SavedRun) {
-    run.updated = evaluationTimestamp();
-    const snapshot = structuredClone(run);
-    const save = saveQueue.current.then(async () => {
-      await historyRequest({ action: "save", run: snapshot });
-      const key = groupHistory([snapshot])[0].key;
-      setManagementRuns(current => current[key]
-        ? { ...current, [key]: [snapshot, ...current[key].filter(entry => entry.id !== snapshot.id)] }
-        : current);
-      setHistoryError("");
+  async function saveHistoryRun(snapshot: SavedRun) {
+    await historyRequest({ action: "save", run: snapshot });
+    const key = historyGroupKey(snapshot);
+    setManagementRuns(current => {
+      const entries = current[key];
+      if (!entries) return current;
+      const existing = entries.find(entry => entry.id === snapshot.id);
+      const runs = existing
+        ? entries.map(entry => entry === existing ? { ...snapshot, createdAt: historyTime(existing) } : entry)
+        : [...entries, snapshot].sort((a, b) => historyTime(a) - historyTime(b));
+      return { ...current, [key]: runs };
     });
-    saveQueue.current = save.catch(() => {});
-    await save;
+    setHistoryError("");
   }
 
-  async function deleteHistory(target: { action: "delete"; id: string } | { action: "deleteGroup"; key: string }, row: HTMLElement | null) {
+  async function deleteHistory(target: HistoryDeletion, row: HTMLElement | null) {
     if (deletingHistory) return;
     setDeletingHistory(true);
     try {
@@ -1000,13 +963,13 @@ export default function Home() {
   }
 
   function earlierTurns(run: SavedRun, entries: SavedRun[]) {
-    const group = groupHistory([run, ...entries.filter(entry => entry.id !== run.id)])[0];
-    return conversationBefore(group.runs, run);
+    const key = historyGroupKey(run);
+    return conversationBefore(entries.filter(entry => historyGroupKey(entry) === key), run);
   }
 
   function openSaved(run: SavedRun, entries: SavedRun[], position: "bottom" | "preserve" = "bottom") {
     if (!run.result) return;
-    setFollowUpQuestion("");
+    setFollowUpQuestion(demo?.followUp ?? "");
     setSettingsOpen(false);
     setCsvOpen(false);
     const question = run.plan?.question ?? run.result.question ?? run.question;
@@ -1036,58 +999,7 @@ export default function Home() {
   const [diagram, setDiagram] = useState({ diagramSvg: "", diagramTitle: "" });
   const { diagramSvg, diagramTitle } = diagram;
 
-  function updateAgent(agentId: number, patch: Partial<Agent>) {
-    setAgents(current => current.map(agent => agent.agentId === agentId ? { ...agent, ...patch } : agent));
-  }
-
-  async function runWorkerPool(plan: Plan, plannedAgents: Agent[], run: SavedRun, signal: AbortSignal) {
-    const results = run.answers;
-    let cursor = 0;
-    const workerCount = Math.min(2, plannedAgents.length);
-
-    async function worker() {
-      while (!signal.aborted && cursor < plannedAgents.length) {
-        const agent = plannedAgents[cursor++];
-        updateAgent(agent.agentId, { status: "working" });
-        try {
-          const response = await postStage<Agent>("worker", {
-            question: plan.question,
-            openaiModel: plan.openaiModel ?? plan.model,
-            questionType: plan.questionType,
-            complexity: plan.complexity,
-            agentCount: plan.agentCount,
-            agentId: agent.agentId,
-            role: agent.role,
-            task: agent.task,
-          }, signal);
-          signal.throwIfAborted();
-          const completed = {
-            ...response,
-            agentId: agent.agentId,
-            role: agent.role,
-            task: agent.task,
-            status: "done" as const,
-          };
-          results.push(completed);
-          await checkpoint(run);
-          updateAgent(agent.agentId, completed);
-        } catch (workerError) {
-          if (signal.aborted) return;
-          const message = workerError instanceof Error ? workerError.message : "Uzman çalıştırılamadı";
-          updateAgent(agent.agentId, { status: "error", error: message });
-          throw workerError;
-        }
-      }
-    }
-
-    const outcomes = await Promise.allSettled(Array.from({ length: workerCount }, () => worker()));
-    for (const outcome of outcomes) {
-      if (outcome.status === "rejected") throw outcome.reason;
-    }
-    return results.sort((a, b) => a.agentId - b.agentId);
-  }
-
-  async function runEvaluation(followUp?: SavedRun) {
+  async function submitEvaluation(followUp?: SavedRun) {
     const draft = followUp ? followUpQuestion : question;
     const cleanQuestion = draft.trim() || (hasAttachment ? "Ekli dosyayı incele." : "");
     const model = openaiModel.trim();
@@ -1105,171 +1017,55 @@ export default function Home() {
     evaluation.current = controller;
     const { signal } = controller;
     try {
-      const csvEvidence = csv.table ? tableQuestion("", csv.table) : "";
-      const initialFollowUp = followUp ? conversationPrompt(cleanQuestion, prior, csvEvidence) : undefined;
-      const requestSource = media ? { name: media.file.name, text: media.digest } : csvSource;
-      const requestKey = followUp
-        ? await requestId(JSON.stringify([followUp.id, initialFollowUp]), model, requestSource)
-        : await requestId(cleanQuestion, model, requestSource);
-      const now = evaluationTimestamp();
-      const newRun: SavedRun = {
-        id: crypto.randomUUID(), requestKey, question: cleanQuestion, model, updated: now,
-        createdAt: now, answers: [], followUpPrompt: initialFollowUp,
-        tablePreview: csv.table ? makeTablePreview(csv.table) : null,
-        parentRunId: followUp?.id,
-        rootQuestion: followUp ? historyRoot(followUp) : undefined,
-      };
-      const directAnswer = !followUp && !hasAttachment && (
-        /^çiz[.!?]*$/iu.test(cleanQuestion)
-          ? "Ne çizmemi istersin? Bu uygulamada doğrudan görsel dosyası üretemiyorum. İstersen bir çizim tarifi veya SVG kodu hazırlayabilirim."
-          : shortAnswer(cleanQuestion)
-      );
-      if (directAnswer) {
-        const { run: saved } = await readHistory<{ run: SavedRun | null }>({
-          action: "find", requestKey, completed: true,
-        }).catch(() => ({ run: null }));
-        const run = saved?.result?.finalAnswer === directAnswer ? saved : newRun;
-        if (!run.result) {
-          run.result = { question: cleanQuestion, questionType: "kısa yanıt", complexity: "low", agentCount: 0, answers: [], finalAnswer: directAnswer, showDiagram: false };
-          await checkpoint(run).catch(() => setHistoryError("Kısa yanıt geçmişe kaydedilemedi."));
-        }
-        openSaved(run, prior);
-        if (isNewQuestion) setQuestion("");
-        return;
-      }
-      setHistoryError("");
-      const token = crypto.randomUUID();
-      await historyRequest({ action: "lock", requestKey, token });
-      const heartbeat = window.setInterval(() => {
-        void historyRequest({ action: "lock", requestKey, token }).catch(() => {});
-      }, 60_000);
-      try {
-        const { run: saved } = await readHistory<{ run: SavedRun | null }>({ action: "find", requestKey });
-        const sourceQuestion = saved?.followUpPrompt ?? initialFollowUp ?? cleanQuestion;
-        if (saved && canReuseSavedResult(saved.result, sourceQuestion)) {
-          if (!saved.imageThumbnail && media?.thumbnail) {
-            saved.imageThumbnail = media.thumbnail;
-            await checkpoint(saved).catch(() => setHistoryError("Görsel önizleme geçmişe kaydedilemedi."));
+      const { kind, run } = await runEvaluation({
+        question: cleanQuestion, model, followUp, previousTurns, csvSource, table: csv.table,
+        media, setupBlocked, signal,
+      }, {
+        postStage,
+        historyRequest,
+        readHistory,
+        saveRun: saveHistoryRun,
+        onHistoryError: setHistoryError,
+        onProgress(progress) {
+          switch (progress.type) {
+            case "planning":
+              setDisplayQuestion(cleanQuestion);
+              setDisplayThumbnail(progress.run.imageThumbnail);
+              setDisplayTable(savedTablePreview(progress.run));
+              setPreviousTurns(prior);
+              setActiveRecord(null);
+              setError("");
+              setResult(null);
+              setAgents([]);
+              setSelected("final");
+              setStage("planning");
+              setSettingsOpen(false);
+              setCsvOpen(false);
+              showResults();
+              break;
+            case "working":
+              setAgents(progress.agents);
+              setStage("working");
+              break;
+            case "expert":
+              setAgents(current => current.map(agent =>
+                agent.agentId === progress.agentId ? { ...agent, ...progress.patch } : agent));
+              break;
+            case "judging":
+              setStage("judging");
+              break;
           }
-          openSaved(saved, prior);
-          if (isNewQuestion) {
-            setQuestion("");
-            void questionAttachment.loadAttachment(undefined);
-          }
-          void followUpAttachment.loadAttachment(undefined);
-          return;
-        }
-        if (setupBlocked) throw new Error("Yeni değerlendirme için OpenAI bağlantısını kurun.");
-
-        const run = saved && !saved.result ? saved : newRun;
-        run.imageThumbnail ??= media?.thumbnail;
-        if (run.tablePreview === undefined) run.tablePreview = newRun.tablePreview;
-        setDisplayQuestion(cleanQuestion);
-        setDisplayThumbnail(run.imageThumbnail);
-        setDisplayTable(savedTablePreview(run));
-        setPreviousTurns(prior);
-        setActiveRecord(null);
-        setError("");
-        setResult(null);
-        setAgents([]);
-        setSelected("final");
-        setStage("planning");
-        setSettingsOpen(false);
-        setCsvOpen(false);
-        showResults();
-
-        if (media && !run.attachmentEvidence) {
-          run.attachmentEvidence = await readAttachment(media.file, cleanQuestion, model, signal);
-        }
-        const attachmentEvidence = run.attachmentEvidence ?? csvEvidence;
-        if (followUp) run.followUpPrompt = conversationPrompt(cleanQuestion, prior, attachmentEvidence);
-
-        const previousPlan = run.plan;
-        const savedExperts = previousPlan?.agents.filter(agent => isDiscussionExpert(agent) && isIndependentExpert(agent));
-        const plan = previousPlan && savedExperts?.length && savedExperts.length === previousPlan.agents.length
-          ? previousPlan
-          : await postStage<Plan>("plan", {
-            question: run.followUpPrompt ?? (cleanQuestion + attachmentEvidence),
-            openaiModel: model,
-          }, signal);
-        signal.throwIfAborted();
-        if (plan.directResponse) {
-          run.answers = [];
-          delete run.plan;
-          run.result = {
-            question: cleanQuestion, model, questionType: plan.questionType, complexity: plan.complexity,
-            agentCount: 0, answers: [], finalAnswer: plan.directResponse, showDiagram: false,
-          };
-          await checkpoint(run);
-          openSaved(run, prior, "preserve");
-          if (isNewQuestion) {
-            setQuestion("");
-            void questionAttachment.loadAttachment(undefined);
-          }
-          void followUpAttachment.loadAttachment(undefined);
-          return;
-        }
-        if (!plan.agents.length || !plan.agents.every(isIndependentExpert)) {
-          throw new Error("Uzmanlar için bağımsız görevler oluşturulamadı.");
-        }
-        const expertIds = new Set(plan.agents.map(agent => agent.agentId));
-        run.answers = previousPlan && previousPlan !== plan
-          ? []
-          : run.answers.filter(answer => expertIds.has(answer.agentId) && isDiscussionExpert(answer));
-        run.plan = plan;
-        await checkpoint(run);
-        signal.throwIfAborted();
-        const plannedAgents: Agent[] = plan.agents.map(agent =>
-          run.answers.find(answer => answer.agentId === agent.agentId) ?? { ...agent, status: "waiting" });
-        setAgents(plannedAgents);
-        setStage("working");
-
-        const answers = await runWorkerPool(plan, plannedAgents.filter(agent => agent.status !== "done"), run, signal);
-        signal.throwIfAborted();
-        setStage("judging");
-        const judgeResponse = await postStage<JudgeResult>("judge", {
-          question: plan.question,
-          openaiModel: plan.openaiModel ?? plan.model,
-          questionType: plan.questionType,
-          complexity: plan.complexity,
-          agentCount: plan.agentCount,
-          answers,
-        }, signal);
-        signal.throwIfAborted();
-        // UI yalnızca sunulacak nihai cevap ve uzman kaynaklarını saklar.
-        // Judge'ın iç çalışma/denetim alanları arayüz sözleşmesine alınmaz.
-        const judge: JudgeResult = {
-          question: judgeResponse.question,
-
-          model: judgeResponse.model,
-          openaiModel: judgeResponse.openaiModel,
-          questionType: judgeResponse.questionType,
-          complexity: judgeResponse.complexity,
-          agentCount: judgeResponse.agentCount,
-          answers: judgeResponse.answers,
-
-          summaryPoints: judgeResponse.summaryPoints ?? [],
-          detailedAnswer: judgeResponse.detailedAnswer,
-          finalAnswer: judgeResponse.finalAnswer,
-          showDiagram: judgeResponse.showDiagram,
-          diagram: judgeResponse.diagram,
-          diagramIssue: judgeResponse.diagramIssue,
-          displayAnswer: judgeResponse.displayAnswer,
-        };
-        run.result = judge;
-        run.answers = run.answers.map(publicExpert);
-        delete run.plan;
-        await checkpoint(run);
-        openSaved(run, prior, "preserve");
-        if (isNewQuestion) {
-          setQuestion("");
+        },
+      });
+      signal.throwIfAborted();
+      openSaved(run, prior, kind === "evaluated" ? "preserve" : "bottom");
+      if (isNewQuestion) {
+        setQuestion(demo?.question ?? "");
+        if (kind !== "direct" && !questionAttachment.csvSource?.id) {
           void questionAttachment.loadAttachment(undefined);
         }
-        void followUpAttachment.loadAttachment(undefined);
-      } finally {
-        window.clearInterval(heartbeat);
-        await historyRequest({ action: "unlock", requestKey, token }).catch(() => {});
       }
+      if (kind !== "direct") void followUpAttachment.loadAttachment(undefined);
     } catch (runError) {
       if (followUp) {
         openSaved(followUp, prior);
@@ -1279,20 +1075,14 @@ export default function Home() {
         return;
       }
       if (signal.aborted) {
-        setAgents(current => current.filter(agent => agent.status === "done"));
-        setSelected("final");
         setStage("cancelled");
+        showQuestion();
         return;
       }
       const message = runError instanceof Error ? runError.message : "Beklenmeyen bir hata oluştu";
       setStage("error");
-      if (isNewQuestion) {
-        setQuestionError(message);
-        showQuestion();
-        return;
-      }
-      setError(message);
-      showResults();
+      setQuestionError(message);
+      showQuestion();
     } finally {
       evaluation.current = null;
       submitting.current = false;
@@ -1311,7 +1101,7 @@ export default function Home() {
         throw new Error("Google Docs bağlantısı doğrulanamadı.");
       }
       setDocsLinks(links => ({ ...links, [run.id]: url }));
-      await checkpoint({ ...run, documentUrl: url });
+      await saveHistoryRun({ ...run, documentUrl: url, updated: Date.now() });
     } catch (docsError) {
       setError(docsError instanceof Error ? docsError.message : "Google Docs kaydı oluşturulamadı");
     } finally {
@@ -1322,7 +1112,7 @@ export default function Home() {
   function showDocsSetup() {
     setSettingsOpen(true);
     setCsvOpen(false);
-    showQuestion(false);
+    if (!desktop) showQuestion(false);
     requestAnimationFrame(() => document.getElementById("google-docs-setup")?.scrollIntoView({ block: "nearest" }));
   }
 
@@ -1333,7 +1123,7 @@ export default function Home() {
 
   function resultExports(run: SavedRun) {
     const documentUrl = googleDocumentUrl(docsLinks[run.id] ?? run.documentUrl);
-    return <EvaluationExports run={run} documentUrl={documentUrl}
+    return <EvaluationExports showDocs={!demo} run={run} documentUrl={documentUrl}
       docsDisabled={setup?.docsEnabled !== true && !documentUrl} managedSetup={setup?.enabled === true} savingDocs={savingDocs} onSetup={showDocsSetup}
       onSave={saveToDocs} onDiagram={showSolutionDiagram} />;
   }
@@ -1389,7 +1179,7 @@ export default function Home() {
     closeComposerPanels();
   }
 
-  const canAttach = !isBusy && (!showWorkspace || !!result);
+  const canAttach = !demo && !isBusy && (!showWorkspace || !!result);
 
   function attachFile(file: File | undefined) {
     if (!file || !canAttach) return;
@@ -1425,7 +1215,7 @@ export default function Home() {
         {readingCsv && <span role="status">Dosya okunuyor…</span>}
         {(csvError || csv.error) && <span role="alert">{csvError || csv.error}</span>}
       </div>
-      {!readingCsv && <button type="button" className="text-button attachment-remove" aria-label="Eki kaldır"
+      {!readingCsv && <button type="button" className="text-button attachment-remove" aria-label="Eki kaldır" disabled={!!demo}
         onClick={() => { void loadAttachment(undefined); setCsvOpen(false); }}>×</button>}
     </div>
   );
@@ -1437,7 +1227,7 @@ export default function Home() {
         onClick={() => { setModelPickerOpen(false); setCsvOpen(false); setSettingsOpen(open => !open); }}>
         <span className="settings-sliders" aria-hidden="true"><i /><i /><i /></span>
       </button>
-      <button type="button" className={`settings-toggle text-button${hasAttachment ? " csv-attached" : ""}`} title={attachmentName ?? "Dosya ekle"}
+      <button type="button" className={`settings-toggle text-button${demo ? " demo-attachment-toggle" : hasAttachment ? " csv-attached" : ""}`} title={attachmentName ?? "Dosya ekle"}
         aria-label="Dosya ekle"
         aria-expanded={csvOpen} aria-controls="csv-panel" onClick={() => { setModelPickerOpen(false); setSettingsOpen(false); setCsvOpen(open => !open); }}>
         <span aria-hidden="true">+</span>
@@ -1445,32 +1235,50 @@ export default function Home() {
     </>
   );
 
+  const panelTable = demo ? questionAttachment.csv.table : csv.table;
   const composerPanels = (
     <>
-    <div id="csv-panel" className="composer-panel csv-input" data-table={!!csv.table}
+    <div id="csv-panel" className="composer-panel csv-input" data-table={!!panelTable}
       data-open={csvOpen} inert={!csvOpen} role="group" aria-label="Dosya ekle">
-      <input id="csv-file" type="file" hidden accept={ATTACHMENT_ACCEPT} disabled={!canAttach || readingCsv}
-        onChange={event => { attachFile(event.target.files?.[0]); event.target.value = ""; }} />
-      <button type="button" className="text-button attachment-choose" disabled={!canAttach || readingCsv}
-        onClick={event => event.currentTarget.parentElement?.querySelector<HTMLInputElement>("#csv-file")?.click()}>
-        Dosya seç
-      </button>
-      {csv.table && <>
-        <p><b>{csv.table.name}</b> · {csv.table.rows.length} satır · {csv.table.columns.length} sütun</p>
+      {demo ? (
+        <a className="text-button attachment-choose" href={demo.download} download={demo.csv.name}>Örnek CSV’yi indir</a>
+      ) : <>
+        <input id="csv-file" type="file" hidden accept={ATTACHMENT_ACCEPT} disabled={!canAttach || readingCsv}
+          onChange={event => { attachFile(event.target.files?.[0]); event.target.value = ""; }} />
+        <button type="button" className="text-button attachment-choose" disabled={!canAttach || readingCsv}
+          onClick={event => event.currentTarget.parentElement?.querySelector<HTMLInputElement>("#csv-file")?.click()}>
+          Dosya seç
+        </button>
+      </>}
+      {desktop && <>
+        <label className="desktop-dataset-picker">
+          Kayıtlı veri kümeleri
+          <select aria-label="Kayıtlı veri kümeleri" value={csvSource?.id ?? ""} disabled={!canAttach || readingCsv}
+            onChange={event => { if (event.target.value) void openDataset(event.target.value); }}>
+            <option value="" disabled>Veri kümesi seçin</option>
+            {datasets.map(dataset => <option key={dataset.id} value={dataset.id}>{dataset.name} · {dataset.id.slice(0, 6)}</option>)}
+          </select>
+        </label>
+        {datasetError && <p role="alert">{datasetError}</p>}
+        <p>İçe aktarılan CSV bu Mac’te saklanır. Değerlendirme sırasında soru, dosya adı, sütun özeti ve ilk 10 satır OpenAI’ye gönderilir. JPG, PNG ve PDF eklerinin tamamı OpenAI’ye gönderilir.</p>
+      </>}
+      {panelTable && <>
+        <p><b>{panelTable.name}</b> · {panelTable.rows.length} satır · {panelTable.columns.length} sütun</p>
         <div className="table-preview" tabIndex={0} role="region" aria-label="CSV önizlemesi"><table>
           <caption>İlk 5 satırın önizlemesi</caption>
-          <thead><tr>{csv.table.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
-          <tbody>{csv.table.rows.slice(0, 5).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} title={cell}>{cell}</td>)}</tr>)}</tbody>
+          <thead><tr>{panelTable.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
+          <tbody>{panelTable.rows.slice(0, 5).map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} title={cell}>{cell}</td>)}</tr>)}</tbody>
         </table></div>
-        <div className="table-preview" tabIndex={0} role="region" aria-label="Sütun istatistikleri"><table>
-          <caption>Tüm dosya üzerinden hesaplanan özet</caption>
-          <thead><tr><th scope="col">Sütun</th><th scope="col">Tür</th><th scope="col">Eksik</th><th scope="col">Toplam</th><th scope="col">Ortalama</th><th scope="col">Min / Maks</th></tr></thead>
-          <tbody>{tableProfile.map(column => <tr key={column.name}>
-            <td>{column.name}</td><td>{column.type === "number" ? "Sayı" : "Metin"}</td><td>{column.missing}</td>
-            <td>{column.statistics ? previewNumber.format(column.statistics.sum) : "—"}</td><td>{column.statistics ? previewNumber.format(column.statistics.mean) : "—"}</td>
-            <td>{column.statistics ? `${previewNumber.format(column.statistics.min)} / ${previewNumber.format(column.statistics.max)}` : "—"}</td>
-          </tr>)}</tbody>
-        </table></div>
+        {!demo &&
+          <div className="table-preview" tabIndex={0} role="region" aria-label="Sütun istatistikleri"><table>
+            <caption>Tüm dosya üzerinden hesaplanan özet</caption>
+            <thead><tr><th scope="col">Sütun</th><th scope="col">Tür</th><th scope="col">Eksik</th><th scope="col">Toplam</th><th scope="col">Ortalama</th><th scope="col">Min / Maks</th></tr></thead>
+            <tbody>{tableProfile.map(column => <tr key={column.name}>
+              <td>{column.name}</td><td>{column.type === "number" ? "Sayı" : "Metin"}</td><td>{column.missing}</td>
+              <td>{column.statistics ? previewNumber.format(column.statistics.sum) : "—"}</td><td>{column.statistics ? previewNumber.format(column.statistics.mean) : "—"}</td>
+              <td>{column.statistics ? `${previewNumber.format(column.statistics.min)} / ${previewNumber.format(column.statistics.max)}` : "—"}</td>
+            </tr>)}</tbody>
+          </table></div>}
       </>}
     </div>
     <div id="evaluation-settings" className="composer-panel evaluation-options"
@@ -1508,7 +1316,7 @@ export default function Home() {
       </>}
 
     </div>
-    <Setup onStatus={setSetup} />
+    {!demo && <Setup onStatus={updateSetup} desktop={desktop} />}
     {historyGroups.length > 0 && <HistoryDisclosure className="history-management" summary={<h2>Değerlendirme kayıtları</h2>}>
       {historyError && <p className="history-error" role="status">{historyError}</p>}
       {historyGroups.map(group => {
@@ -1518,10 +1326,10 @@ export default function Home() {
           <HistoryDisclosure summaryClassName="history-record-heading" summary={group.question}
             onOpen={() => void loadManagementGroup(group.key)}>
             {runs ? <ul className="history-runs">
-              {runs.toSorted((a, b) => (a.createdAt ?? a.updated) - (b.createdAt ?? b.updated)).map(run => <li className="history-entry" key={run.id}>
+              {runs.map(run => <li className="history-entry" key={run.id}>
                 <div className="history-record-meta">
                   <span>{run.question}</span>
-                  <small>{run.model} · {new Date(run.createdAt ?? run.updated).toLocaleString("tr-TR")}</small>
+                  <small>{run.model} · {new Date(historyTime(run)).toLocaleString("tr-TR")}</small>
                 </div>
                 {run.followUpPrompt && <button type="button" className="history-delete" disabled={isBusy || savingDocs || deletingHistory}
                   aria-label="Takip sorusunu sil" title="Takip sorusunu sil"
@@ -1564,7 +1372,7 @@ export default function Home() {
       )}
       <header className="topbar">
         <div className="brand">
-          <Image className="brand-logo" src="/ortak-akil-lens.svg" width={44} height={44} alt="" priority unoptimized />
+          <Image className="brand-logo" src={brandLogo} width={44} height={44} alt="" priority unoptimized />
           <span className="brand-name">Ortak Akıl</span>
         </div>
       </header>
@@ -1585,8 +1393,9 @@ export default function Home() {
                   void followUpAttachment.loadAttachment(undefined);
                   setSettingsOpen(false);
                   setCsvOpen(false);
-                  setQuestion("");
+                  setQuestion(demo?.question ?? "");
                   setQuestionError("");
+                  setStage("idle");
                   showQuestion();
                 }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1623,7 +1432,7 @@ export default function Home() {
           </div>
         </aside>
       <div className="evaluation-main" id="top">
-      {!showWorkspace && (
+      {!showWorkspace && !demo && (
         <div className="question-examples" aria-label="Örnek ERP sorusu">
           {exampleQuestions.map((example, index) =>
             <p key={example} style={{ animationDelay: `${index * 6}s` }}
@@ -1633,10 +1442,11 @@ export default function Home() {
       )}
       <section className="question-area" hidden={showWorkspace}>
         <div className="question-form question-card" onKeyDown={handleComposerKeyDown}>
-        <form id="evaluation-form" className="composer-form" onSubmit={event => { event.preventDefault(); void runEvaluation(); }}>
+        <form id="evaluation-form" className="composer-form" onSubmit={event => { event.preventDefault(); void submitEvaluation(); }}>
           {!showWorkspace && attachmentCard}
           <textarea
             id="question"
+            readOnly={!!demo}
             onPointerDown={closeComposerPanels}
             onFocus={closeComposerPanels}
             aria-label="Değerlendirilecek soru"
@@ -1665,6 +1475,7 @@ export default function Home() {
             </button>
           </div>
           {questionError && <p className="question-error" role="alert">{questionError}</p>}
+          {stage === "cancelled" && <p className="evaluation-notice" role="status">Değerlendirme durduruldu.</p>}
         </form>
           {!showWorkspace && composerPanels}
         </div>
@@ -1729,10 +1540,10 @@ export default function Home() {
           <div className="thread-composer question-card" data-busy={isBusy} onKeyDown={handleComposerKeyDown}>
             <form id="follow-up-form" className="composer-form" onSubmit={event => {
               event.preventDefault();
-              if (activeRecord?.result && !isBusy) void runEvaluation(activeRecord);
+              if (activeRecord?.result && !isBusy) void submitEvaluation(activeRecord);
             }}>
               {attachmentCard}
-              {!isBusy && <textarea rows={1} disabled={!result} aria-label="Takip sorusu" placeholder="Bu değerlendirme hakkında soru sor"
+              {!isBusy && <textarea rows={1} readOnly={!!demo} disabled={!result} aria-label="Takip sorusu" placeholder="Bu değerlendirme hakkında soru sor"
                 onPointerDown={closeComposerPanels} onFocus={closeComposerPanels}
                 value={followUpQuestion} onChange={event => setFollowUpQuestion(event.target.value)}
                 onKeyDown={event => {

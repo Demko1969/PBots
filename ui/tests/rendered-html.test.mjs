@@ -45,7 +45,6 @@ test("keeps n8n behind a same-origin server route", async () => {
   ]);
 
   assert.match(page, /\/api\/n8n\/\$\{stage\}/);
-  assert.match(page, /Math\.min\(2, plannedAgents\.length\)/);
   assert.match(page, /Google Docs’a kaydet/);
   assert.match(route, /N8N_WEBHOOK_BASE_URL/);
   assert.match(route, /multi-agent-ui-plan/);

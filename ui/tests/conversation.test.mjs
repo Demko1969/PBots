@@ -34,6 +34,12 @@ test("reconstructs older turns using their saved order", () => {
   assert.deepEqual(conversationBefore([oldSecond, oldFirst, oldRoot], oldSecond), [oldRoot, oldFirst]);
 });
 
+test("keeps earlier turns visible when an intervening follow-up is deleted", () => {
+  const third = { ...second, id: "third", parentRunId: second.id, createdAt: 4 };
+  const later = { ...sibling, createdAt: third.createdAt };
+  assert.deepEqual(conversationBefore([root, first, third, later], third), [root, first]);
+});
+
 test("reserves space for recent answers and preserves CSV evidence after the question", () => {
   const csvRoot = { ...root, result: { ...root.result, question: root.question + "\n\nCSV analysis context\nFile evidence" } };
   const longTurns = Array.from({ length: 10 }, (_, index) => ({
