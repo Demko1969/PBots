@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
+import { setupGuide, useMessages } from "../lib/workspace-language";
+
 export type SetupStatus = {
   enabled: boolean;
   defaultModel?: string;
@@ -18,6 +20,7 @@ export default function Setup({ onStatus, desktop = false }: {
   onStatus: (status: SetupStatus) => void;
   desktop?: boolean;
 }) {
+  const { language, t } = useMessages();
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [editingKey, setEditingKey] = useState(false);
@@ -87,40 +90,40 @@ export default function Setup({ onStatus, desktop = false }: {
   if (!status?.enabled) return null;
   const ready = status.configured && status.connected && !status.installing;
   return <section className={`setup-panel${ready ? " setup-ready" : ""}`} aria-live="polite">
-    <h2>{ready ? "Sistem hazır" : "İlk kurulum"}</h2>
-    {status.configured && !status.connected && <p>Servis başlatılıyor…</p>}
+    <h2>{ready ? t("Sistem hazır") : t("İlk kurulum")}</h2>
+    {status.configured && !status.connected && <p>{t("Servis başlatılıyor…")}</p>}
     {status.ownerSetupRequired && <p className="owner-setup-notice">
-      <a href={status.editorUrl || "http://localhost:5680"} target="_blank" rel="noreferrer">n8n yönetici hesabı oluştur</a>
+      <a href={status.editorUrl || "http://localhost:5680"} target="_blank" rel="noreferrer">{t("n8n yönetici hesabı oluştur")}</a>
     </p>}
-    {desktop && status.configured && !editingKey && <button type="button" className="text-button" onClick={() => setEditingKey(true)}>API anahtarını değiştir</button>}
+    {desktop && status.configured && !editingKey && <button type="button" className="text-button" onClick={() => setEditingKey(true)}>{t("API anahtarını değiştir")}</button>}
     {(!status.configured || editingKey) && <form onSubmit={configure}>
-      <label htmlFor="setup-key">OpenAI API anahtarı</label>
+      <label htmlFor="setup-key">{t("OpenAI API anahtarı")}</label>
       <input id="setup-key" type="password" autoComplete="off" spellCheck={false} autoCapitalize="none" value={apiKey}
         onChange={event => setApiKey(event.target.value)} disabled={saving || status.installing || status.ownerSetupRequired} required placeholder="sk-…" />
       <button className="primary-button" disabled={!apiKey.trim() || saving || status.installing || (!desktop && !status.connected) || status.ownerSetupRequired}>
-        {saving || status.installing ? (desktop ? "Kaydediliyor…" : "İş akışları kuruluyor…") : "Kurulumu tamamla"}
+        {saving || status.installing ? (desktop ? t("Kaydediliyor…") : t("İş akışları kuruluyor…")) : t("Kurulumu tamamla")}
       </button>
     </form>}
-    {(error || status.error) && <p role="alert">{error || status.error}</p>}
+    {(error || status.error) && <p role="alert">{t(error || status.error || "")}</p>}
     {desktop ? <>
-      <p className="desktop-disclosure">Soru ve analiz bağlamı OpenAI ile paylaşılır. Gerçek değerlendirmeler OpenAI API kullanımı oluşturur.</p>
-      <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">OpenAI API anahtarları</a>
+      <p className="desktop-disclosure">{t("Soru ve analiz bağlamı OpenAI ile paylaşılır. Gerçek değerlendirmeler OpenAI API kullanımı oluşturur.")}</p>
+      <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">{t("OpenAI API anahtarları")}</a>
       <details id="google-docs-setup" className="desktop-disclosure">
-        <summary>Google Docs kurulumu{status.docsEnabled ? " · Hazır" : ""}</summary>
-        <p>Google Cloud projenizde Google Docs API’yi etkinleştirin ve Masaüstü uygulaması türünde bir OAuth istemcisi oluşturun. Dışa aktarırken Google, belgeyi Drive’ınıza kaydetmek için izin ister.</p>
+        <summary>{t("Google Docs kurulumu")}{status.docsEnabled ? t(" · Hazır") : ""}</summary>
+        <p>{t("Google Cloud projenizde Google Docs API’yi etkinleştirin ve Masaüstü uygulaması türünde bir OAuth istemcisi oluşturun. Dışa aktarırken Google, belgeyi Drive’ınıza kaydetmek için izin ister.")}</p>
         <form onSubmit={configureDocs}>
-          <label htmlFor="google-client-id">Google istemci kimliği</label>
+          <label htmlFor="google-client-id">{t("Google istemci kimliği")}</label>
           <input id="google-client-id" required value={googleId} onChange={event => setGoogleId(event.target.value)} />
-          <label htmlFor="google-client-secret">Google istemci anahtarı</label>
+          <label htmlFor="google-client-secret">{t("Google istemci anahtarı")}</label>
           <input id="google-client-secret" required type="password" value={googleSecret} autoComplete="off" onChange={event => setGoogleSecret(event.target.value)} />
-          <button className="primary-button" disabled={docsSaving}>{docsSaving ? "Kaydediliyor…" : "Google Docs ayarlarını kaydet"}</button>
+          <button className="primary-button" disabled={docsSaving}>{docsSaving ? t("Kaydediliyor…") : t("Google Docs ayarlarını kaydet")}</button>
         </form>
       </details>
-    </> : <div className="docs-settings" aria-label="Kurulum belgeleri">
-      <a href="/docs/openai.txt"
-        target="_blank" rel="noreferrer">OpenAI kurulum belgesi</a>
-      <a id="google-docs-setup" href="/docs/google-docs.txt"
-        target="_blank" rel="noreferrer">Google Docs kurulum belgesi</a>
+    </> : <div className="docs-settings" aria-label={t("Kurulum belgeleri")}>
+      <a href={setupGuide("openai", language)}
+        target="_blank" rel="noreferrer">{t("OpenAI kurulum belgesi")}</a>
+      <a id="google-docs-setup" href={setupGuide("google-docs", language)}
+        target="_blank" rel="noreferrer">{t("Google Docs kurulum belgesi")}</a>
     </div>}
   </section>;
 }

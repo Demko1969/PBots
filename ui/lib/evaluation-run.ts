@@ -77,6 +77,7 @@ type EvaluationInput = {
   csvSource: { id?: string; name: string; text: string } | null;
   table: DataTable | null;
   media: { file: File; digest: string; thumbnail?: string } | null;
+  requestScope?: string;
   setupBlocked: boolean;
   signal: AbortSignal;
 };
@@ -147,7 +148,7 @@ export function isDiscussionExpert(agent: Pick<Agent, "role" | "task">) {
 }
 
 export async function runEvaluation(
-  { question, model, followUp, previousTurns, csvSource, table, media, setupBlocked, signal }: EvaluationInput,
+  { question, model, followUp, previousTurns, csvSource, table, media, requestScope, setupBlocked, signal }: EvaluationInput,
   { postStage, historyRequest, readHistory, saveRun, onProgress, onHistoryError }: EvaluationDependencies,
 ): Promise<EvaluationOutcome> {
   signal.throwIfAborted();
@@ -158,7 +159,7 @@ export async function runEvaluation(
   const requestSource = media ? { name: media.file.name, text: media.digest } : csvSource;
   const requestKey = followUp
     ? await requestId(JSON.stringify([followUp.id, initialFollowUp]), model, requestSource)
-    : await requestId(question, model, requestSource);
+    : await requestId(requestScope ? JSON.stringify([requestScope, question]) : question, model, requestSource);
   signal.throwIfAborted();
   const now = Date.now();
   const newRun: SavedRun = {

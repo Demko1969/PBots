@@ -1,25 +1,41 @@
-# Ortak Akıl tarayıcı demosu
+# Ortak Akıl browser demo
 
-Demo, Ortak Akıl’ın sohbet arayüzünü ve 20 örnek ERP destek talebini kullanır.
-Gönder düğmesiyle başlayın. Botlardan iki uzman görüşüne geçebilir, nihai
-yanıtın yanındaki düğmeyle çözüm akışını açabilir ve hazır takip sorusunu
-gönderebilirsiniz. Ayarlar model seçeneklerini gösterir. + menüsünden örnek
-CSV’nin önizlemesine ve indirme bağlantısına ulaşabilirsiniz. Demo, örnek yanıtları tarayıcıda gösterir ve OpenAI isteği yapmaz.
+The [GitHub Pages demo](https://demko1969.github.io/ortak-akil/) uses the main
+chat interface and a prepared ERP support scenario. Choose English, French, or
+Turkish in the top bar. You can switch languages during the conversation and
+stay on the same turn.
 
-Geliştirme ortamında `pnpm --dir ui install --frozen-lockfile` komutuyla
-bağımlılıkları yükleyip kök klasörden `npm run demo:build` çalıştırın.
-`output/web-demo/Ortak-Akil-Demo.html` dosyasını doğrudan bir tarayıcıda açabilirsiniz.
+1. Submit the prepared question about which ERP tickets breach their SLA and
+   what to fix first. Select each of the three expert robots to see what the SLA,
+   support process, and ticket prioritization specialists found. Open the solution
+   diagram next to the final recommendation.
+2. Send the first-week measurement question.
+3. Submit the question about an overdue Finance ticket. The **+** menu previews
+   the attachment. Select the screenshot in the conversation to enlarge it.
+4. Ask how to set an alert before the ticket’s SLA deadline. The installation
+   guide appears after the last answer.
 
-İnceleme PR’ı derleme ve testleri çalıştırır ve bağımsız HTML’yi bir Actions
-çıktısı olarak hazırlar. Pages çıktısı yalnızca `index.html` ve derlenmiş
-`assets/` klasörünü içerir. Yerelde bir HTTP sunucusunda bu iki öğeyi
-`/ortak-akil/` altında sunarak proje yolunu deneyebilirsiniz.
+**Settings** shows the fixed sample model. The CSV is downloadable from the
+attachment menu. All four turns run locally in the browser with prepared
+answers. There are no model calls, API credentials, or visitor uploads.
 
-Yayın onaylandığında `Demko1969/ortak-akil` deposunda **Settings → Pages →
-Source → GitHub Actions** seçin. İş akışı varsayılan dala eklendikten sonra bu
-dalı seçip **Actions → Ortak Akıl web demo → Run workflow** üzerinden yayınlayın.
-Sonucu [proje adresinde](https://demko1969.github.io/ortak-akil/) doğrulayın.
+## Preview locally
 
-Çevrimdışı indirme ayrıca yayımlanabilir. `Ortak-Akil-Demo.html` dosyasını yerel
-derlemeden veya iş akışının **Artifacts** bölümündeki ZIP dosyasından alın ve
-aynı deponun GitHub Release’inde **Assets** bölümüne ekleyin.
+From the repository root:
+
+```sh
+pnpm --dir ui install --frozen-lockfile
+npm run demo:build
+python3 -m http.server 4173 --bind 127.0.0.1 --directory output/web-demo
+```
+
+Open [the local preview](http://127.0.0.1:4173/). To check the GitHub Pages
+project path, serve `index.html` and `assets/` under `/ortak-akil/`.
+
+## Publish to GitHub Pages
+
+The Pages workflow builds and tests the demo on pull requests. To publish,
+set **Settings → Pages → Source → GitHub Actions** in `Demko1969/ortak-akil`.
+After merging the workflow into the default branch, run **Actions → Ortak Akıl
+web demo → Run workflow** on that branch and verify the [Pages
+site](https://demko1969.github.io/ortak-akil/).
